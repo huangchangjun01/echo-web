@@ -52,6 +52,18 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/RolesPage.vue'),
         meta: { title: '角色管理' },
       },
+      {
+        path: 'role-editor/:roleId?',
+        name: 'AdminRoleEditor',
+        component: () => import('@/views/admin/RoleEditorPage.vue'),
+        meta: { title: '角色编辑器' },
+      },
+      {
+        path: 'debug-panel/:roleId?',
+        name: 'AdminDebugPanel',
+        component: () => import('@/views/admin/DebugPanelPage.vue'),
+        meta: { title: '调试面板' },
+      },
     ],
   },
   {

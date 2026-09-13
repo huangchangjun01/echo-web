@@ -63,13 +63,47 @@ body {
   background: rgba(255, 255, 255, 0.25);
 }
 
-/* Element Plus dark mode overrides */
-.el-select-dropdown {
-  --el-bg-color-overlay: #1a1a2e;
-  --el-border-color: rgba(255, 255, 255, 0.12);
-  --el-text-color-primary: rgba(255, 255, 255, 0.85);
-  --el-text-color-regular: rgba(255, 255, 255, 0.65);
-  --el-fill-color-light: rgba(255, 255, 255, 0.06);
+/* Element Plus dark mode overrides
+ *
+ * 注意:el-select / el-dropdown / el-datepicker 等所有 el-popper 子树都通过
+ * teleport 渲染到 <body> 下,不在 .admin-layout 子树内 —— AdminLayout 上的
+ * CSS 变量无法级联。必须在 :root(全局)层级覆写,弹层容器才能读到暗色变量。
+ *
+ * 关键点:
+ *  1. .el-popper 默认 background: var(--el-bg-color-overlay) 从 :root 取值,
+ *     默认 #fff 白底 —— 必须把 --el-bg-color-overlay 提到 :root 覆写。
+ *  2. .el-select-dropdown__item 默认 color: var(--el-text-color-regular)
+ *     同样从 :root 读取,白字叠加白底 = "白底白字",必须把文字色也提到 :root。 */
+:root {
+  /* 弹层/dialog/message-box/select-dropdown 等都通过 teleport 到 body 下,
+     不在 .admin-layout 子树内 —— 必须把背景色变量也提到 :root 覆写。
+     注意:el-message-box / el-dialog 用的是 --el-bg-color(不是 --el-bg-color-overlay),
+     漏掉这个变量就是"白底白字"内容不可见。 */
+  --el-bg-color: rgba(20, 22, 28, 0.98);
+  --el-bg-color-overlay: rgba(20, 22, 28, 0.98);
+  --el-bg-color-page: #0a0a10;
+  --el-text-color-primary: rgba(255, 255, 255, 0.92);
+  --el-text-color-regular: rgba(255, 255, 255, 0.78);
+  --el-text-color-secondary: rgba(255, 255, 255, 0.55);
+  --el-text-color-placeholder: rgba(255, 255, 255, 0.4);
+  --el-fill-color-blank: rgba(20, 22, 28, 0.98);
+  --el-fill-color-light: rgba(255, 255, 255, 0.08);
+  --el-fill-color-lighter: rgba(255, 255, 255, 0.04);
+  --el-border-color: rgba(255, 255, 255, 0.16);
+  --el-border-color-light: rgba(255, 255, 255, 0.12);
+  --el-box-shadow-light: 0 0 12px rgba(0, 0, 0, 0.5);
+}
+
+/* 下拉项显式加深交互态：变量已设深色背景,这里只覆盖 hover/selected 的具体颜色 */
+.el-select-dropdown__item:hover,
+.el-select-dropdown__item.is-hovering {
+  background-color: rgba(22, 93, 255, 0.18);
+  color: #fff;
+}
+
+.el-select-dropdown__item.is-selected {
+  color: #79abff;
+  font-weight: 600;
 }
 
 /* 登录弹窗：覆盖 Element Plus 默认的白色 dialog 背景。

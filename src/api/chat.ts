@@ -276,6 +276,21 @@ function parseMemoryRecall(data: string): ChatMemoryRecall | null {
   return { count: count || hits.length, hits }
 }
 
+/** mood_update 帧归一化 */
+function parseMoodUpdate(data: string): import('@/types/chat').ChatMoodUpdate | null {
+  const obj = safeJsonParse(data)
+  if (!obj) return null
+  return {
+    instantVal: typeof obj.instantVal === 'number' ? obj.instantVal : 0,
+    instantIntensity: typeof obj.instantIntensity === 'number' ? obj.instantIntensity : 0,
+    instantEmotion: typeof obj.instantEmotion === 'string' ? obj.instantEmotion : 'neutral',
+    shortVal: typeof obj.shortVal === 'number' ? obj.shortVal : 0,
+    baselineVal: typeof obj.baselineVal === 'number' ? obj.baselineVal : 0,
+    expression: typeof obj.expression === 'string' ? obj.expression : 'neutral',
+    valence: typeof obj.valence === 'number' ? obj.valence : 0,
+  }
+}
+
 /** done 帧归一化：{full, sessionId} */
 function parseDonePayload(data: string): { full?: string; sessionId?: string } {
   const obj = safeJsonParse(data)
@@ -333,6 +348,7 @@ export interface SendChatStreamOptions {
   onMemory?: (info: ChatMemoryResult) => void
   onThinking?: (event: ChatThinkingEvent) => void
   onRecall?: (info: ChatMemoryRecall) => void
+  onMoodUpdate?: (event: import('@/types/chat').ChatMoodUpdate) => void
   onDone?: (payload: { full?: string; sessionId?: string }) => void
   onError?: (error: Error) => void
 }
@@ -580,6 +596,20 @@ function handleFrame(
       if (r) {
         console.info('[sse] ← memory_recall, count=%d', r.count)
         h.onRecall?.(r)
+      }
+      return
+    }
+    case 'mood_update': {
+      // M2:三桶心情实时更新
+      const m = parseMoodUpdate(data)
+      if (m) {
+        console.info(
+          '[sse] ← mood_update, instant=%s, emotion=%s, expression=%s',
+          m.instantVal?.toFixed(2) ?? '?',
+          m.instantEmotion,
+          m.expression,
+        )
+        h.onMoodUpdate?.(m)
       }
       return
     }

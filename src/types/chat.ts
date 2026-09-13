@@ -119,6 +119,22 @@ export interface ChatMemoryRecall {
   hits: ChatRecallHit[]
 }
 
+/**
+ * M2:三桶心情实时更新事件。
+ * 由 echo-ai biz/chat.py 在每轮 done 事件前下发( |delta|>0.15 时)。
+ */
+export interface ChatMoodUpdate {
+  instantVal: number          // 即时心情 value [-1, 1]
+  instantIntensity: number    // 即时强度 [0, 1]
+  instantEmotion: string      // 即时情绪标签
+  shortVal: number            // 短期心情 value
+  baselineVal: number         // 基线心情 value
+  /** 表情映射:smile/happy/excited/sad/cry/angry/concern/thinking */
+  expression: string
+  /** 本轮 user_msg 的 valence(用于 PixelCharacter 色调联动) */
+  valence: number
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'

@@ -14,6 +14,7 @@
       xmlns="http://www.w3.org/2000/svg"
       shape-rendering="crispEdges"
       class="pixel-character__svg"
+      :style="moodFilterStyle"
       aria-label="像素女生"
     >
       <!-- ==================== 落地阴影 ==================== -->
@@ -463,6 +464,14 @@ interface Props {
   talking?: boolean
   size?: number
   handPose?: HandPose
+  /**
+   * M2 联动：8 表情映射(由 mood_update 事件的 expression 字段传入)。
+   * smile/happy/excited/sad/cry/angry/concern/thinking
+   * 当传入时,会基于 valence 自动决定 state(优先级低于显式 state)。
+   */
+  moodExpression?: string
+  /** M2 联动:整体色调滤镜(由 mood valence 计算得出) */
+  moodColor?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -470,6 +479,8 @@ const props = withDefaults(defineProps<Props>(), {
   talking: false,
   size: 240,
   handPose: 'rest',
+  moodExpression: '',
+  moodColor: '',
 })
 
 /** 帧高宽比（高 / 宽）— viewBox 128×160 故 1.25 */
@@ -516,6 +527,21 @@ function stopIdleCycle() {
 /** 实际渲染用 state：idle 时把子状态映射成具体表现 */
 const derivedState = computed<CharacterState>(() => {
   if (props.state !== 'idle') return props.state
+  // M2:根据 moodExpression 推断 state（优先级高于 idle 子状态）
+  if (props.moodExpression) {
+    const map: Record<string, CharacterState> = {
+      smile: 'idle',
+      happy: 'happy',
+      excited: 'excited',
+      sad: 'sad',
+      cry: 'sad',
+      angry: 'sad',
+      concern: 'thinking',
+      thinking: 'thinking',
+      neutral: 'idle',
+    }
+    if (map[props.moodExpression]) return map[props.moodExpression]!
+  }
   switch (idleSubState.value) {
     case 'wave':
       return 'greet'
@@ -525,6 +551,12 @@ const derivedState = computed<CharacterState>(() => {
     default:
       return 'idle'
   }
+})
+
+/** M2:根据 moodColor 生成 SVG 滤镜(整体色调微调) */
+const moodFilterStyle = computed(() => {
+  if (!props.moodColor) return {}
+  return { filter: `drop-shadow(0 0 8px ${props.moodColor})` }
 })
 
 /** 实际手部姿态：idle 时由子状态接管 */

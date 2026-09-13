@@ -6,6 +6,7 @@ import type {
   ChatContextInfo,
   ChatMemoryRecall,
   ChatMemoryResult,
+  ChatMoodUpdate,
   ChatSession,
   ChatThinkingEvent,
   ChatToolCall,
@@ -55,6 +56,10 @@ export const useChatStore = defineStore('chat', () => {
   const selectedModel = ref(DEFAULT_MODEL)
   const userId = ref(getUserId())
   const defaultSessionId = ref<string | null>(null)
+  /** M2: 当前角色的心情快照（前端 PixelCharacter 联动） */
+  const currentMood = ref<ChatMoodUpdate | null>(null)
+  /** M2: 当前对话角色的关系值（intimacy 进度条用） */
+  const currentIntimacy = ref<number>(0)
 
   /**
    * 实际发送到后端的 sessionId。
@@ -289,6 +294,18 @@ export const useChatStore = defineStore('chat', () => {
     session.updatedAt = Date.now()
   }
 
+  /**
+   * M2:更新当前角色的心情快照（全局,不绑定 session）。
+   * 收到 mood_update SSE 帧时调用,驱动 PixelCharacter 表情联动。
+   */
+  function updateMood(mood: ChatMoodUpdate | null) {
+    if (mood === null) {
+      currentMood.value = null
+      return
+    }
+    currentMood.value = mood
+  }
+
   function clearSession(sessionId: string) {
     const session = sessions.value.find((s) => s.id === sessionId)
     if (session) {
@@ -329,6 +346,9 @@ export const useChatStore = defineStore('chat', () => {
     appendMessageMemoryResult,
     appendMessageThinking,
     appendMessageMemoryRecall,
+    currentMood,
+    currentIntimacy,
+    updateMood,
     clearSession,
   }
 })

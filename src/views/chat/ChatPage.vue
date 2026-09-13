@@ -507,9 +507,13 @@
             :state="pixelState"
             :talking="isPixelTalking"
             :size="characterSize"
+            :mood-expression="moodExpression"
+            :mood-color="moodColor"
             class="pixel-mode__character"
           />
           <div class="pixel-mode__hint">{{ pixelHint }}</div>
+          <!-- M2:心情指示器 -->
+          <MoodIndicator :mood="currentMood" class="pixel-mode__mood" />
         </div>
 
         <!-- 对白区：字幕式交替（默认仅显示当前轮次） -->
@@ -655,6 +659,7 @@ import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import { useSpeechSynthesis } from '@/composables/useSpeechSynthesis'
 import { createTypewriter } from '@/composables/useTypewriter'
 import PixelCharacter from '@/components/PixelCharacter.vue'
+import MoodIndicator from '@/components/MoodIndicator.vue'
 import PixelScene from '@/components/PixelScene.vue'
 import ChatImage from '@/components/ChatImage.vue'
 import ChatAttachment from '@/components/ChatAttachment.vue'
@@ -697,6 +702,20 @@ const isPixelTalking = ref(false)
 /** 像素模式下的会话文本（用于气泡显示） */
 const pixelDialogue = ref<string>('')
 const pixelUserText = ref<string>('')
+
+/** M2:当前心情快照（来自 SSE mood_update） */
+const currentMood = computed(() => chatStore.currentMood)
+/** M2:PixelCharacter 8 表情映射 */
+const moodExpression = computed(() => currentMood.value?.expression ?? '')
+/** M2:PixelCharacter 色调（hex 字符串） */
+const moodColor = computed(() => {
+  if (!currentMood.value) return ''
+  const v = currentMood.value.instantVal
+  if (v > 0.5) return 'rgba(255, 220, 120, 0.45)'
+  if (v > 0) return 'rgba(255, 255, 255, 0.2)'
+  if (v >= -0.5) return 'rgba(120, 180, 255, 0.4)'
+  return 'rgba(180, 130, 220, 0.5)'
+})
 
 /** 是否在流式响应结束后自动播报后端消息；持久化到 localStorage */
 const AUTO_PLAY_KEY = 'chat_auto_play'
@@ -1323,6 +1342,12 @@ async function handleSend() {
       // 回忆检索命中详情：覆盖写入 memoryRecall（一次响应通常一次）
       onRecall: (info) => {
         chatStore.appendMessageMemoryRecall(localSessionId, info)
+        scrollToBottom()
+      },
+      // M2:三桶心情实时更新（驱动 PixelCharacter + MoodIndicator）
+      onMoodUpdate: (m) => {
+        chatStore.updateMood(m)
+        // 心情变化时,滚动到底部确保 mood chip 可见
         scrollToBottom()
       },
       onDone: () => {
