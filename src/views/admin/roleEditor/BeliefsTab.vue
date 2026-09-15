@@ -14,7 +14,7 @@
           角色对某些话题的立场。可手动新增,也可在「演化建议」中 Apply LLM 抽取的建议。
         </p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreateDialog">+ 新增信念</el-button>
+      <el-button type="primary" @click="openCreateDialog">新增信念</el-button>
     </div>
 
     <el-table
@@ -42,11 +42,26 @@
           </el-tooltip>
         </template>
         <template #default="{ row }">
-          <el-progress
-            :percentage="Math.round(row.confidence * 100)"
-            :stroke-width="8"
-            :status="confidenceStatus(row.confidence)"
-          />
+          <!--
+            el-progress 自带文字插槽但鼠标 hover 时不显示原始 confidence 值
+            (后端存的是 0~1 的小数,UI 上展示的整数百分比有损精度)。
+            这里外层套 el-tooltip:鼠标 hover 整列单元格时弹出原始值,
+            让用户看到 0.42 / 0.85 这种更细的刻度。
+          -->
+          <el-tooltip
+            :content="`置信度：${formatConfidence(row.confidence)}`"
+            placement="top"
+            popper-class="trait-tooltip"
+            :show-after="150"
+          >
+            <div class="beliefs-tab__confidence-cell">
+              <el-progress
+                :percentage="Math.round(row.confidence * 100)"
+                :stroke-width="8"
+                :status="confidenceStatus(row.confidence)"
+              />
+            </div>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column prop="source" label="来源" width="120">
@@ -134,7 +149,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Edit, Plus } from '@element-plus/icons-vue'
+import { Delete, Edit } from '@element-plus/icons-vue'
 import type { BeliefItem } from '@/types/roleCore'
 import { useRoleCoreStore } from '@/stores/roleCore'
 import { TIP_BELIEFS, TIP_CONFIDENCE } from '@/types/roleCoreTooltips'
@@ -245,6 +260,19 @@ function confidenceStatus(c: number): 'success' | 'warning' | 'exception' {
   return 'exception'
 }
 
+/**
+ * 格式化置信度为可读字符串:同时给出小数(原始精度)与百分比,便于对照。
+ * 例:0.42 → "0.42 (42%)"
+ *
+ * el-progress 自带文字只能显示整数百分比(0~100),丢精度。
+ * hover tooltip 上展示完整精度,让用户能看到 0.65 / 0.85 这种细分。
+ */
+function formatConfidence(c: number): string {
+  const clamped = Math.max(0, Math.min(1, c))
+  const pct = Math.round(clamped * 100)
+  return `${clamped.toFixed(2)} (${pct}%)`
+}
+
 function sourceLabel(s: string): string {
   const map: Record<string, string> = {
     user_edit: '手动',
@@ -311,5 +339,15 @@ const Math = window.Math
   margin: 0;
   font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.6);
+}
+
+/*
+ * 置信度单元格:hover 时整列触发 el-tooltip。
+ * el-progress 自带 wrapper 没有占据 100% 宽度,这里用 div 包一层
+ * 让 hover 区域 = 整列宽度,鼠标在 progress 附近任何位置都能看到数值。
+ */
+.beliefs-tab__confidence-cell {
+  width: 100%;
+  cursor: default;
 }
 </style>

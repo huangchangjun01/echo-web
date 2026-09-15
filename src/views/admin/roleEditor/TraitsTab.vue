@@ -29,9 +29,21 @@
         :type="p.key === local.presetType ? 'primary' : 'info'"
         :effect="p.key === local.presetType ? 'dark' : 'plain'"
         class="traits-tab__preset-chip"
+        :class="{ 'traits-tab__preset-chip--active': p.key === store.activePresetType }"
         @click="applyPreset(p)"
       >
         {{ p.label }}
+        <!--
+          「使用中」徽标:仅当该 chip 与 store.activePresetType 一致时显示,
+          表示 chat 回复时真正在读该 preset 的 OCEAN。
+          视觉上与「当前预设」(本地编辑中的)区分——后者可能用户点 chip
+          但还没保存,active 才是真正生效的。
+        -->
+        <span
+          v-if="p.key === store.activePresetType"
+          class="traits-tab__preset-badge"
+          title="当前 chat 回复基于此预设"
+        >使用中</span>
         <!--
           hover 才出现的红色 X：点击触发删除流程。
           - 标准陪伴(is_protected=true):直接 toast 警告,不弹 confirm
@@ -54,6 +66,35 @@
     <div class="traits-tab__current">
       <span class="traits-tab__current-label">当前预设：</span>
       <strong>{{ currentPresetLabel }}</strong>
+      <!--
+        「使用性格」按钮:仅切换 active preset(让 chat 读该预设的 OCEAN),
+        不写五维 —— 即使用户当前在编辑的 OCEAN 与该 preset 不一致也能切。
+        与「保存五维性格配置」职责拆分:
+          - 保存按钮:落库当前 preset 的五维
+          - 使用性格:仅切 active(后端 upsert role_active_preset)
+        若当前 preset 与 store.activePresetType 一致 → 按钮 disabled,
+        避免无意义的请求与重复 toast。
+      -->
+      <el-button
+        size="small"
+        type="success"
+        :disabled="store.saving || local.presetType === store.activePresetType"
+        class="traits-tab__use-preset-btn"
+        @click="onUsePreset"
+      >使用性格</el-button>
+    </div>
+
+    <!--
+      「当前使用」:真正在 chat 回复时读的 OCEAN(后端权威)。
+      与上方「当前预设」的区别:
+        - 当前预设:用户当前在编辑的(可能点 chip 但未保存)
+        - 当前使用:已保存落库,chat 实际生效的
+      保存成功后两者会一致;切换预设但未保存时,两者会不同。
+    -->
+    <div class="traits-tab__active">
+      <span class="traits-tab__active-label">当前使用：</span>
+      <strong>{{ activePresetLabel }}</strong>
+      <span class="traits-tab__active-hint">（chat 回复基于此预设）</span>
     </div>
 
     <div class="traits-tab__content">
@@ -72,7 +113,7 @@
     </div>
 
     <div class="traits-tab__actions">
-      <el-button type="primary" @click="onSave">设置当前性格</el-button>
+      <el-button type="primary" @click="onSave">保存五维性格配置</el-button>
       <el-button @click="onReset">重置</el-button>
     </div>
 
@@ -128,7 +169,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref as useRef } from 'vue'
+import { computed, reactive, ref as useRef, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Plus } from '@element-plus/icons-vue'
 import OceanRadar from '@/components/OceanRadar.vue'
@@ -146,9 +187,18 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', v: OceanTraits): void
   (e: 'save', silent?: boolean): void
+  /** 用户点击 chip 切换预设时(无需保存)—— 父级用于同步 activePresetType */
+  (e: 'preset-change', presetType: string): void
 }>()
 
-// 内部 working copy
+/**
+ * 从 modelValue 派生 local working copy(每次 preset 切换时重新派)。
+ *
+ * 多预设隔离:
+ *   store.traits 是所有已保存预设的 OCEAN 列表(每 preset 一行)。
+ *   切换预设的语义是「展示哪个 preset 的值」,store.traits 不被改写。
+ *   local 反映当前展示的 preset;用户编辑后点保存,只写当前 preset。
+ */
 const local = reactive<OceanTraits>({
   roleId: props.modelValue.roleId,
   openness: props.modelValue.openness,
@@ -159,56 +209,130 @@ const local = reactive<OceanTraits>({
   presetType: props.modelValue.presetType,
 })
 
+/**
+ * 同步 local 到 props.modelValue.presetType 变化。
+ *
+ * 触发场景:
+ *   1) el-tab-pane 默认 lazy 行为下,切走再切回时可能重新挂载组件;
+ *      此时 local 会基于新 modelValue 重新初始化(上方的 reactive())。
+ *   2) 父级 activePresetType 变化(用户在别的入口切了预设)。
+ *
+ * 注意:仅当 presetType 变化时才同步,OCEAN 五维不强制覆盖 — 用户在当前 preset
+ * 上已编辑但未保存的值不应被父级 modelValue 覆盖。
+ */
+watch(
+  () => props.modelValue.presetType,
+  (newPreset, oldPreset) => {
+    if (newPreset === oldPreset) return
+    const saved = store.findTraitsByPreset(newPreset)
+    if (saved) {
+      // 该 preset 已有保存值 → 用保存值覆盖 local(包括五维)
+      Object.assign(local, saved)
+    } else {
+      // 该 preset 未保存过 → 套用预设基线
+      const presetDef = store.presets.find((p) => p.key === newPreset)
+      if (presetDef) {
+        Object.assign(local, {
+          roleId: props.modelValue.roleId,
+          openness: presetDef.openness,
+          conscientiousness: presetDef.conscientiousness,
+          extraversion: presetDef.extraversion,
+          agreeableness: presetDef.agreeableness,
+          neuroticism: presetDef.neuroticism,
+          presetType: newPreset,
+        })
+      } else {
+        // 兜底:仅切换 presetType,五维保留
+        local.presetType = newPreset as OceanTraits['presetType']
+      }
+    }
+  },
+)
+
 const currentPreset = computed<OceanPreset | null>(
   () => store.presets.find((p) => p.key === local.presetType) ?? null,
 )
 const currentPresetLabel = computed(() => currentPreset.value?.label ?? local.presetType)
 
 /**
+ * 当前真正生效的 preset(后端权威,store.activePresetType)。
+ * 用于 chip 上的「使用中」徽标 + 预设区下方的「当前使用」展示行。
+ *
+ * 与 currentPresetLabel 的差别:
+ *   - currentPresetLabel: 用户当前在编辑的(本地 local.presetType)
+ *   - activePresetLabel:  chat 回复时实际读的(后端 role_active_preset 表)
+ */
+const activePreset = computed<OceanPreset | null>(
+  () => store.presets.find((p) => p.key === store.activePresetType) ?? null,
+)
+const activePresetLabel = computed(
+  () => activePreset.value?.label ?? store.activePresetType,
+)
+
+/**
  * 把预设的 OCEAN 值应用到 sliders,同时切换 presetType。
  *
  * 行为:
- *   - 若该 role 此前保存的 presetType === p.key(用户曾用此预设并保存过)
+ *   - 若该 role 此前已保存该 preset(在 store.traits 列表中找到对应行)
  *     → 保留 store 中已保存的 OCEAN 值(不覆盖用户自定义)
- *   - 否则 → 套用预设默认值(preview 形态)
+ *   - 否则 → 套用预设基线值(preview 形态)
  *
- * 修复:之前永远用预设默认值覆盖 local,导致用户保存的自定义值在切回预设时被冲掉。
+ * 注意:此处仅切换「编辑中的 preset」,不切换 active 预设(由「使用性格」按钮
+ * 显式触发)。chip 切换也不弹 toast 提示 —— 用户已在 UI 上看到 chip 变化,
+ * 再弹一次"已切换到..."是冗余信息。
+ *
+ * 修复(OCEAN 互窜 bug):
+ *   历史上 store.traits 是单条记录,这里用 `saved.presetType === p.key` 判定
+ *   是否保留自定义值。但切到其他预设保存后,saved.presetType 就变了,导致
+ *   切回原预设时走 else 分支被基线覆盖,自定义值丢失。
+ *   修复后,store.traits 是按 preset 隔离的列表,任何 preset 的自定义值都
+ *   独立保留,不再互相覆盖。
  */
 function applyPreset(p: OceanPreset) {
-  const saved = store.traits
-  if (saved && saved.presetType === p.key) {
-    // 角色已用此预设并保存过 → 保留用户自定义值
+  const saved = store.findTraitsByPreset(p.key)
+  if (saved) {
+    // 该 preset 此前已保存 → 展示用户自定义值
     local.openness = saved.openness
     local.conscientiousness = saved.conscientiousness
     local.extraversion = saved.extraversion
     local.agreeableness = saved.agreeableness
     local.neuroticism = saved.neuroticism
-    ElMessage.info(`已切换到「${p.label}」(使用已保存的自定义值)`)
   } else {
-    // 首次切此预设 → preview 默认值
+    // 该 preset 此前未保存 → 套用预设基线
     local.openness = p.openness
     local.conscientiousness = p.conscientiousness
     local.extraversion = p.extraversion
     local.agreeableness = p.agreeableness
     local.neuroticism = p.neuroticism
-    ElMessage.info(`已套用「${p.label}」基线,点击保存 OCEAN 生效`)
   }
   // p.key 由后端 key 规则保证是 PresetType 字面量之一(或用户自定义)
-  // 这里用 as PresetType 是因为 local.presetType 是字面量联合类型,
-  // 允许扩展后允许用户自定义 key(后端已校验通过)。
+  // 这里用 as 是因为 local.presetType 是字面量联合类型,允许扩展后用户自定义 key。
   local.presetType = p.key as OceanTraits['presetType']
+  // 通知父级更新 activePresetType,使切换后切走再回来 chip 仍保留用户选择
+  emit('preset-change', p.key)
+}
 
-  // chip 点击只更新 local(预览新预设的基线),不触发保存。
-  //
-  // 为什么不做 auto-save:
-  //   当前数据模型:一个 role 只有一份 OCEAN 值(presetType + 5 维)。
-  //   如果切 chip 时 auto-save,会把当前 saved OCEAN 覆盖成新预设的基线
-  //   → 切回原预设时,store.traits.presetType 已不是原预设名,前面的"保留
-  //   自定义值"逻辑失效,会套用预设默认 → 用户自定义值被冲掉。
-  //
-  // 用户需点"设置当前性格"按钮才落库。切回同预设 chip 时,
-  // 上面的 saved.presetType===p.key 分支会保留用户值。
-  ElMessage.info(`已切换到「${p.label}」基线,点「设置当前性格」保存`)
+/**
+ * 「使用性格」按钮:仅切换 active preset(让 chat 回复时读该预设的 OCEAN),
+ * 不写五维。即使用户当前在编辑的 OCEAN 与该 preset 不一致也能切。
+ *
+ * 校验:
+ *   - roleId 必填(空时一般不会到这里,模板已禁用按钮)
+ *   - presetType 与当前 active 一致时按钮 disabled,无需重复请求
+ */
+async function onUsePreset() {
+  if (!props.modelValue.roleId) {
+    ElMessage.warning('请先选择角色')
+    return
+  }
+  if (local.presetType === store.activePresetType) return
+  try {
+    await store.setActivePreset(props.modelValue.roleId, local.presetType)
+    ElMessage.success(`已使用「${currentPresetLabel.value}」`)
+  } catch (e) {
+    const err = e as { message?: string }
+    ElMessage.error(err.message ?? '切换失败')
+  }
 }
 
 function onSave() {
@@ -217,14 +341,17 @@ function onSave() {
 }
 
 function onReset() {
+  // 重置到当前 preset 的已保存值(若有),否则到预设基线
+  const saved = store.findTraitsByPreset(local.presetType)
+  const cur = currentPreset.value
   Object.assign(local, {
     roleId: props.modelValue.roleId,
-    openness: props.modelValue.openness,
-    conscientiousness: props.modelValue.conscientiousness,
-    extraversion: props.modelValue.extraversion,
-    agreeableness: props.modelValue.agreeableness,
-    neuroticism: props.modelValue.neuroticism,
-    presetType: props.modelValue.presetType,
+    openness: saved?.openness ?? cur?.openness ?? 0,
+    conscientiousness: saved?.conscientiousness ?? cur?.conscientiousness ?? 0,
+    extraversion: saved?.extraversion ?? cur?.extraversion ?? 0,
+    agreeableness: saved?.agreeableness ?? cur?.agreeableness ?? 0,
+    neuroticism: saved?.neuroticism ?? cur?.neuroticism ?? 0,
+    presetType: local.presetType,
   })
 }
 
@@ -438,6 +565,53 @@ async function onDeleteChip(p: OceanPreset) {
 }
 .traits-tab__current-label {
   color: rgba(255, 255, 255, 0.5);
+}
+/*
+ * 「使用性格」按钮 —— 与「当前预设」同行,视觉上比 chip 行重一些,
+ * 让用户能找到"切换生效预设"的明确入口。
+ */
+.traits-tab__use-preset-btn {
+  margin-left: 0.4rem;
+}
+/*
+ * 「使用中」徽标:在 chip 内嵌一个金色小标签,提示该 preset 是 chat 真正在用的。
+ * 仅在 active preset 的 chip 上渲染,与「当前预设」编辑态区分。
+ */
+.traits-tab__preset-badge {
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  border-radius: 0.25rem;
+  background: rgba(64, 158, 255, 0.85);
+  color: #fff;
+  vertical-align: middle;
+}
+/* 当前 active chip:加一圈柔和高亮,即使未在编辑也一眼能识别 */
+.traits-tab__preset-chip--active {
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.5);
+}
+/*
+ * 「当前使用」行:与「当前预设」同样排版,但加色块高亮以区分(active 是
+ * 真正生效的,编辑中的 preset 可能还未保存)。
+ */
+.traits-tab__active {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.75);
+  padding: 0.3rem 0.6rem;
+  background: rgba(64, 158, 255, 0.08);
+  border-left: 2px solid rgba(64, 158, 255, 0.6);
+  border-radius: 0.25rem;
+}
+.traits-tab__active-label {
+  color: rgba(255, 255, 255, 0.5);
+}
+.traits-tab__active-hint {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.75rem;
 }
 .traits-tab__content {
   display: grid;

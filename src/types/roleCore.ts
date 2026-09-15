@@ -174,6 +174,21 @@ export interface CoreSnapshot {
 }
 
 /**
+ * OCEAN 五维列表响应（GET /api/role-core/traits）。
+ *
+ * 与早期直接返回 OceanTraits[] 不同,现在包成对象,带上当前生效的 preset:
+ *   - list: 该 (user, role) 下所有已保存预设的 OCEAN 五维(每个 preset 一行)
+ *   - activePresetType: 当前真正生效的预设 key(决定 chat 回复时读的 OCEAN)
+ *
+ * 历史演进:曾直接返回 OceanTraits[],新增「当前使用」跟踪后改为对象形式。
+ * 前端按此结构解析。
+ */
+export interface TraitsListResponse {
+  list: OceanTraits[]
+  activePresetType: string
+}
+
+/**
  * 反馈评分 5 档（M7 占位）
  */
 export type FeedbackRating = -2 | -1 | 0 | 1 | 2

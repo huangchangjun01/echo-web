@@ -21,6 +21,7 @@ import type {
   RelationshipSnapshot,
   RolePersona,
   SuggestionItem,
+  TraitsListResponse,
   UpdateBeliefReq,
   UpdatePresetReq,
 } from '@/types/roleCore'
@@ -78,14 +79,50 @@ export async function saveTraits(req: OceanTraits): Promise<OceanTraits | null> 
 }
 
 /**
- * 取 OCEAN 五维。未填写时后端返回 HTTP 200 + data:null，本函数返回 null，
- * 由调用方（store / page）按空态 UI 提示用户使用默认预设。
+ * 取 OCEAN 五维 + 当前生效预设(按预设隔离的列表)。
+ *
+ * 返回 TraitsListResponse{list, activePresetType}:
+ *   - list: 当前 (user, role) 下所有已保存预设的 OCEAN 五维(每个 preset 一条)
+ *   - activePresetType: 当前真正生效的预设 key(决定 chat 回复时读的 OCEAN)
+ *
+ * 失败兜底:返回空 list + 默认 activePresetType('companion_default'),
+ * 让前端按空态 UI 提示用户初始化。
+ *
+ * 历史演进:
+ *   - 曾返回单条 OceanTraits → 切换预设时值互窜的 bug
+ *   - 改为返回 OceanTraits[] → 修复,但没有「当前使用」概念
+ *   - 改为返回 TraitsListResponse → 增加 active preset 跟踪
  */
-export async function getTraits(roleId: number): Promise<OceanTraits | null> {
-  const env = asEnvelope<OceanTraits>(
+export async function getTraits(roleId: number): Promise<TraitsListResponse> {
+  const env = asEnvelope<TraitsListResponse>(
     await request.get('/role-core/traits', { params: { roleId } }),
   )
-  return unwrap<OceanTraits>(env)
+  const data = unwrap<TraitsListResponse>(env)
+  return data ?? { list: [], activePresetType: 'companion_default' }
+}
+
+/**
+ * 切换当前使用的 OCEAN 预设(POST /api/role-core/active-preset)。
+ *
+ * 与 saveTraits 的职责拆分:
+ *   - saveTraits:写入某预设的 OCEAN 五维值(可能改得很细)
+ *   - setActivePreset:仅切换 chat 回复时读哪个 preset,不写 OCEAN
+ *
+ * 前端对应「保存五维性格配置」+「使用性格」两个独立按钮。
+ *
+ * 失败(由 axios 拦截器 toast):
+ *   - 400: 参数错误或 presetType 不存在
+ *   - 500: 后端写库失败
+ */
+export async function setActivePreset(
+  roleId: number,
+  presetType: string,
+): Promise<string> {
+  const env = asEnvelope<{ activePresetType: string }>(
+    await request.post('/role-core/active-preset', { roleId, presetType }),
+  )
+  const data = unwrap<{ activePresetType: string }>(env)
+  return data?.activePresetType ?? presetType
 }
 
 // ==================== Core Snapshot（调试面板用）====================

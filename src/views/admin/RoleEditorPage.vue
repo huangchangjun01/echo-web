@@ -51,7 +51,7 @@
           v-if="traits"
           :model-value="traits"
           @update:model-value="onTraitsUpdate"
-          @apply-preset="onApplyPreset"
+          @preset-change="onPresetChange"
           @save="onTraitsSave"
         />
         <div v-else class="role-editor__empty">
@@ -141,10 +141,208 @@ const persona = computed<RolePersona | null>(() =>
     ? store.persona
     : store.persona,
 )
-const traits = computed<OceanTraits | null>(() =>
-  store.traits && store.traits.roleId === roleId.value
-    ? store.traits
-    : store.traits,
+/**
+ * 当前激活的预设 key —— 切 tab 后是否保留 chip 高亮在此决定。
+ *
+ * 历史:曾用 `store.traits.find(companion_default) ?? store.traits[0]` 作为
+ * modelValue 来源,导致切走再回来永远是「标准陪伴」,无法保留用户选择。
+ * 修复:用 ref 显式追踪,用户在 TraitsTab 内部点 chip(emit preset-change)
+ * 或保存成功时同步更新。
+ *
+ * 进一步修复(跨页面导航场景):
+ *   仅 ref 仍不够 —— 用户从「角色编辑器」导航到「角色管理」再回来时,
+ *   RoleEditorPage 整个组件会被卸载重建,ref 状态全丢,activePresetType
+ *   会回到默认 'companion_default'。所以这里把"用户在该角色下最后选中的
+ *   preset"持久化到 localStorage,key 按 roleId 隔离(每个角色独立保留
+ *   自己最后选中的 preset),组件挂载时优先从 localStorage 读回。
+ */
+const STORAGE_ACTIVE_PRESET = 'echo_role_core_active_preset'
+
+function readActivePresetFromStorage(roleId: number): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_ACTIVE_PRESET)
+    if (!raw) return null
+    const map = JSON.parse(raw) as Record<string, string>
+    return map[String(roleId)] ?? null
+  } catch {
+    // localStorage 不可用 / 数据损坏 → 静默回退到默认
+    return null
+  }
+}
+
+function writeActivePresetToStorage(roleId: number, presetType: string): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_ACTIVE_PRESET)
+    const map: Record<string, string> = raw ? (JSON.parse(raw) as Record<string, string>) : {}
+    map[String(roleId)] = presetType
+    localStorage.setItem(STORAGE_ACTIVE_PRESET, JSON.stringify(map))
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 当前「页面级 active preset」ref —— 驱动 traits computed + 「当前使用」展示。
+ *
+ * 关键:这个 ref 与 store.activePresetType 不再完全等价。
+ *
+ *   - store.activePresetType:后端权威,只在 SaveTraits / SetActivePreset / loadAll 时更新
+ *   - 本 ref:用户在本页面的当前选择(含未确认的 chip-click)
+ *
+ * 默认值策略(组件挂载时):
+ *   1) 优先 store.activePresetType(后端权威)—— 这是「当前正在使用」的性格
+ *   2) 兜底用 localStorage —— 用于兼容 store 尚未加载完成的瞬间
+ *   3) 都没有 → 'companion_default'
+ *
+ * 历史演进:
+ *   - 早期:localStorage 作为跨页面导航的唯一持久化手段 → 但与后端不同步
+ *   - 加入 role_active_preset 表后:后端成为权威,但 localStorage 在 mount 时
+ *     抢先赋值,导致 store watcher 之后用旧 active(后端未刷新)把它覆盖回去,
+ *     用户切走再回来看到的不是 active preset(就是这次的 bug)
+ *   - 现在:store 是 source of truth,localStorage 仅作兜底
+ *
+ * 同步规则:
+ *   - 用户在 chip-click / 保存 / 使用性格 时:主动更新本 ref + 写 localStorage
+ *   - 后端 store 更新时(loadAll / SetActivePreset):同步给本 ref
+ *   - 切换 roleId 时:重置为该角色后端的 active preset(由下方 loadAll 完成)
+ */
+const activePresetType = ref<string>(store.activePresetType || 'companion_default')
+
+/**
+ * 监听 activePresetType 变化 → 写入 localStorage。
+ *
+ * 注意:这里只是「镜像」写到 localStorage,不再用 localStorage 引导初值。
+ * 跨页面导航后,store.activePresetType 会随 loadAll 重新拉取(后端权威),
+ * 然后通过下面那个 store → page 同步 watcher 写到本 ref。
+ *
+ * 为什么还保留 localStorage 写:
+ *   - store 加载完成前的极短窗口里,UI 短暂看到的是本 ref 的值。
+ *   - 如果后端调用 loadAll 失败,localStorage 是最后的兜底。
+ *   - 不写也无所谓,但留着不会有副作用。
+ */
+watch(activePresetType, (v) => {
+  if (v && roleId.value) writeActivePresetToStorage(roleId.value, v)
+})
+
+/**
+ * 单向同步:store.activePresetType → 本地 ref(后端权威优先)。
+ *
+ * 历史 bug 修复:
+ *   早期 mount 路径里,localStorage 先回填了 'rational_advisor' 到本 ref,
+ *   随后 store.activePresetType 因 loadAll 触发更新成 'companion_default',
+ *   这个 watcher 会把它「同步」回去 —— 但用户实际想要的「当前使用」是
+ *   后端 store 的值,而不是上次 chip-click 的值。
+ *
+ *   现在 mount 时已经把 store.activePresetType 作为本 ref 的初值,
+ *   localStorage 不再抢先赋值,因此这个同步永远是把后端的状态反映到 UI,
+ *   不会反过来用 stale state 覆盖后端。
+ */
+watch(
+  () => store.activePresetType,
+  (v) => {
+    if (v && v !== activePresetType.value) {
+      activePresetType.value = v
+    }
+  },
+)
+
+/**
+ * 监听 roleId 变化 → 当用户切到不同角色时,先看 store 是否有缓存的 active,
+ * 没有才用 localStorage 兜底。
+ *
+ * 历史上曾直接用 localStorage(读出来的是「上次 chip-click 但可能未保存」的值),
+ * 导致切到新角色时,旧角色的临时选择被错误地套用。
+ *
+ * 注意:store.activePresetType 在 roleId 切换后会被新的 loadAll 异步覆盖,
+ * 下方的 store → page 同步 watcher 会接着把新的 active 写进来。
+ * 这里只负责「先给个不会闪烁的初值」。
+ */
+watch(
+  () => roleId.value,
+  (newRoleId) => {
+    if (!newRoleId) {
+      activePresetType.value = 'companion_default'
+      return
+    }
+    // 优先用 store 缓存(同角色内可能刚刚被 SetActivePreset 更新过)
+    if (store.activePresetType) {
+      activePresetType.value = store.activePresetType
+      return
+    }
+    // 兜底:同角色冷启动场景(例如跨页面导航回来,store 还没 loadAll)
+    const stored = readActivePresetFromStorage(newRoleId)
+    activePresetType.value = stored ?? 'companion_default'
+  },
+  { immediate: true },
+)
+
+/**
+ * 当前展示给 TraitsTab 的 OCEAN 快照。
+ *
+ * 多预设隔离:store.traits 是按 preset 隔离的列表(每个 preset 一行)。
+ * 这里按 activePresetType 在列表中查找对应 OCEAN 作为 modelValue:
+ *   - 找到 → 用该行的 OCEAN(用户在该 preset 上的自定义值)
+ *   - 未找到 → 套用预设基线值(用户尚未保存该 preset,但已选中这个 chip)
+ *   - 列表为空 → 用零值空快照(允许用户开始编辑)
+ *
+ * 重要:「未找到」的兜底分支必须用 activePresetType 而不是 companion_default —
+ * 否则用户点击 chip「理性顾问」但还没点保存时切走再回来,会显示 companion_default
+ * 的值,看起来像是 chip 被重置。
+ */
+const traits = computed<OceanTraits | null>(() => {
+  const presetKey = activePresetType.value || 'companion_default'
+  // 1) 列表中有匹配 → 用用户已保存的自定义值
+  const matched = store.traits.find((t) => t.presetType === presetKey)
+  if (matched) return matched
+  // 2) 列表中没有该 preset 的保存行 → 套用预设字典里的基线值
+  //    这就是用户点 chip 但还没点保存的场景:UI 要展示该 preset 的基线,
+  //    而不是 fallback 到 companion_default(否则用户以为 chip 被重置了)
+  const presetDef = store.presets.find((p) => p.key === presetKey)
+  if (presetDef) {
+    return {
+      roleId: roleId.value,
+      openness: presetDef.openness,
+      conscientiousness: presetDef.conscientiousness,
+      extraversion: presetDef.extraversion,
+      agreeableness: presetDef.agreeableness,
+      neuroticism: presetDef.neuroticism,
+      presetType: presetKey,
+    }
+  }
+  // 3) 预设字典里也没有(罕见:用户切换到一个刚被删除的自定义 preset)
+  //    用零值空快照兜底
+  return {
+    roleId: roleId.value,
+    openness: 0,
+    conscientiousness: 0,
+    extraversion: 0,
+    agreeableness: 0,
+    neuroticism: 0,
+    presetType: presetKey,
+  }
+})
+
+/**
+ * 当 store.traits 变化时(数据加载完成 / 切换角色) → 不再用「localStorage 兜底」校正。
+ *
+ * 历史 bug:此 watcher 早期逻辑是「如果 localStorage 记录的值存在,就用 localStorage
+ * 覆盖回来」。这导致 store.activePresetType 在 loadAll 后用后端值同步给本 ref,
+ * 紧接着这个 watcher 又用 localStorage(用户上次 chip-click 但未「使用性格」的值)
+ * 把它覆盖回去,用户切走再回来看到的不是后端 active preset —— 就是这次的 bug。
+ *
+ * 现在 active preset 由后端 role_active_preset 表权威管理:
+ *   - store.activePresetType 是后端权威的镜像
+ *   - 上面的 store → page 同步 watcher 已经把后端值反映到本 ref
+ *   - 这里不再做二次校正,让「当前使用」始终 = 后端 active preset
+ *
+ * 保留 immediate: true 是为了让 watch 链路在测试中可观察;无副作用。
+ */
+watch(
+  () => store.traits,
+  () => {
+    // no-op —— store.activePresetType watcher 已经处理 active preset 同步
+  },
+  { immediate: true },
 )
 
 // 空态文案：明确告诉用户是为哪个角色、缺哪块数据,避免笼统的"暂无数据"
@@ -161,25 +359,34 @@ const traitsEmptyDesc = computed(() => {
     : '请先在角色列表选择一个角色'
 })
 
-async function ensureLoaded() {
+async function ensureLoaded(force = false) {
   if (!roleId.value) {
     ElMessage.warning('请先在角色列表选择一个角色')
     return
   }
-  // 若 store 里的 roleId 不一致，重新加载
+  // 是否需要重新加载:
+  //   - 角色不匹配 → 必须重载
+  //   - 数据全空 → 必须重载(从未加载)
+  //   - force=true → 强制重载(用于 mount 时,确保后端 activePresetType 最新)
+  //
+  // 历史:曾用「缓存命中就跳过」节省一次 HTTP,但跨页面导航时 store 的
+  // activePresetType 可能已陈旧(例如用户在 chip-click 后切走再回来,
+  // 没有调用「使用性格」,后端不会主动推)。现在 mount 强制刷新一次,
+  // 让 store → page 同步 watcher 能用最新的后端值校正本地 ref。
   if (
+    force ||
     store.currentRoleId !== roleId.value ||
-    (store.persona === null && store.traits === null)
+    (store.persona === null && store.traits.length === 0)
   ) {
     try {
       await store.loadAll(roleId.value)
     } catch (e) {
-      // 加载失败时不让空态 UI 失效：把 persona/traits 显式置空,
+      // 加载失败时不让空态 UI 失效:把 persona/traits 显式置空,
       // 让角色编辑器继续展示空态,避免一次请求异常导致整页不可用。
       const err = e as { message?: string }
       console.error('[RoleEditor] loadAll failed:', err.message ?? e)
       store.persona = null
-      store.traits = null
+      store.traits = []
     }
   }
 }
@@ -193,7 +400,13 @@ onMounted(async () => {
     }
   }
   store.bootstrap()
-  await ensureLoaded()
+  // 预加载预设字典 —— 让 traits computed 在 TraitsTab 挂载前也能用预设基线
+  // 兜底(用户首次进编辑器但 store.presets 还没被 TraitsTab 加载的情况)。
+  // 失败静默忽略:TraitsTab 自己也会加载一次。
+  store.loadPresets().catch(() => {})
+  // mount 时强制 reload —— 确保 store.activePresetType 反映后端最新状态,
+  // 修复「跨页面导航后 personality 页不显示当前使用中的性格」bug
+  await ensureLoaded(true)
 })
 
 watch(
@@ -219,13 +432,46 @@ async function onPersonaSave(silent?: boolean) {
   }
 }
 
+/**
+ * TraitsTab 最新 emit 的 modelValue(包含 presetType + 五维)。
+ * 每次 TraitsTab 通过 update:modelValue 上报当前 preset 的最新值,
+ * 保存时(onTraitsSave)直接用此值作为请求体,确保保存的就是用户当前看到/编辑的 preset。
+ */
+const pendingTraits = ref<OceanTraits | null>(null)
+
 async function onTraitsUpdate(v: OceanTraits) {
-  store.traits = v
+  // TraitsTab 主动 emit 的当前展示 preset 的最新值(local 状态)。
+  // 缓存下来供 onTraitsSave 使用,store.traits 列表由 saveTraits 维护。
+  pendingTraits.value = { ...v }
+  // 同步更新 activePresetType:TraitsTab emit modelValue 的同时意味着
+  // 当前 preset 是用户最后选中的(无论是否已保存),切走后回填正确。
+  activePresetType.value = v.presetType
 }
+
+/**
+ * 用户在 TraitsTab 内部点击 chip 切换预设时触发(无需保存)。
+ * 立即同步 activePresetType,使切走再回来 chip 仍保留用户当前选择。
+ */
+function onPresetChange(presetType: string) {
+  activePresetType.value = presetType
+}
+
 async function onTraitsSave(silent?: boolean) {
-  if (!traits.value) return
+  // 优先用 TraitsTab 缓存的当前 preset 值;若空,退到 props.modelValue
+  const req = pendingTraits.value ?? traits.value
+  if (!req) return
   try {
-    const saved = await store.saveTraits(traits.value)
+    const saved = await store.saveTraits(req)
+    // 成功保存后用返回的最新行覆盖 pendingTraits
+    pendingTraits.value = saved
+    // 注意:保存 OCEAN 不再切换 active —— 后端职责拆分后,
+    // 「保存五维性格配置」只写五维,「使用性格」是另一个独立动作
+    // (走 store.setActivePreset,在 TraitsTab 的 onUsePreset 中调用)。
+    // 这里不再写 activePresetType —— 维持当前 active 不变。
+    // 但「当前预设」(本地编辑的 preset)要同步:
+    // 用户在哪个 preset 上点保存,本地 activePresetType 应保留那个,
+    // 切走再回来能看到自己最后编辑的 preset。
+    activePresetType.value = saved.presetType
     // chip 切预设自动保存时(silent=true)不弹成功 toast,避免频繁切预设被刷屏
     if (!silent) ElMessage.success('OCEAN 已保存')
     // chip 切预设的"大变更"是用户明确意图(他就是要切到那个预设的基线),不应再弹 warning 让他点确认
@@ -243,17 +489,38 @@ async function onTraitsSave(silent?: boolean) {
   }
 }
 
-function onApplyPreset(preset: string) {
-  // store.applyPresetLocally 是 M1 的本地切换；保存时再走 service 层硬上限
-  // 这里我们仅同步 presetType 到 traits，然后由用户点保存生效
-  if (!traits.value) return
-  store.applyPresetLocally(preset as OceanTraits['presetType'])
+/**
+ * 从空态的「使用默认预设」入口进来:
+ *   往 store.traits 列表里塞一条「标准陪伴」占位记录(五维全 0),
+ *   TraitsTab 会立即出现,用户可继续编辑后点保存入库存行。
+ *   注意:仅占位,不直接写 DB;点"设置当前性格"才落库。
+ */
+function onCreateTraits() {
+  if (!roleId.value) {
+    ElMessage.warning('请先选择一个角色')
+    return
+  }
+  // 仅在列表中还没有任何条目时初始化占位,避免重复添加
+  if (store.traits.length === 0) {
+    store.traits = [
+      {
+        roleId: roleId.value,
+        openness: 0,
+        conscientiousness: 0,
+        extraversion: 0,
+        agreeableness: 0,
+        neuroticism: 0,
+        presetType: 'companion_default',
+      },
+    ]
+  }
+  ElMessage.info('已套用默认预设,可在滑块上微调后点击「设置当前性格」入库')
 }
 
 /**
- * 从空态的「新建人格」入口进来：
- *   初始化一份空白人格塞进 store（roleId 已带上，savePersona 会自动 upsert），
- *   PersonaTab 会立即出现，用户填完点保存即落库。
+ * 从空态的「新建人格」入口进来:
+ *   初始化一份空白人格塞进 store(roleId 已带上,savePersona 会自动 upsert),
+ *   PersonaTab 会立即出现,用户填完点保存即落库。
  */
 function onCreatePersona() {
   if (!roleId.value) {
@@ -270,29 +537,9 @@ function onCreatePersona() {
     taboos: [],
     exampleDialogs: [],
   }
-  ElMessage.info('已为你创建空白人格，填写完成后点击「保存人格」即可入库')
+  ElMessage.info('已为你创建空白人格,填写完成后点击「保存人格」即可入库')
 }
 
-/**
- * 从空态的「使用默认预设」入口进来：
- *   直接套用「标准陪伴」预设（OCEAN 五维全 0 + presetType），用户可在滑块上微调后保存。
- */
-function onCreateTraits() {
-  if (!roleId.value) {
-    ElMessage.warning('请先选择一个角色')
-    return
-  }
-  store.traits = {
-    roleId: roleId.value,
-    openness: 0,
-    conscientiousness: 0,
-    extraversion: 0,
-    agreeableness: 0,
-    neuroticism: 0,
-    presetType: 'companion_default',
-  }
-  ElMessage.info('已套用默认预设，可在滑块上微调后点击「保存 OCEAN」入库')
-}
 </script>
 
 <style scoped>

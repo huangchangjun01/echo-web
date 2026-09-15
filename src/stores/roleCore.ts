@@ -33,6 +33,7 @@ import {
   listPresets as listPresetsApi,
   savePersona as savePersonaApi,
   saveTraits as saveTraitsApi,
+  setActivePreset as setActivePresetApi,
   updateBelief as updateBeliefApi,
   updatePreset as updatePresetApi,
 } from '@/api/roleCore'
@@ -45,7 +46,20 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
   // ----- state -----
   const currentRoleId = ref<number | null>(null)
   const persona = ref<RolePersona | null>(null)
-  const traits = ref<OceanTraits | null>(null)
+  /**
+   * 当前 (user, role) 下所有已保存预设的 OCEAN 列表(每个预设一条)。
+   * 切预设保存互不影响——后端为每个 preset 独立存行。
+   */
+  const traits = ref<OceanTraits[]>([])
+  /**
+   * 当前真正生效的预设 key(决定 chat 回复时读的 OCEAN)。
+   *
+   * 历史:曾没有这个字段,UI 上的"当前预设"完全由 store.traits 列表推断,
+   * 与 chat 实际使用的 personality_bias 不同步。修复:后端在 SaveTraits 时
+   * 把被保存的 preset 自动设为 active,并通过 GET /role-core/traits 返回。
+   * UI 在 chip 上显示"使用中"标记 + 在预设区下方显示"当前使用: xxx"。
+   */
+  const activePresetType = ref<string>('companion_default')
   const coreSnapshot = ref<CoreSnapshot | null>(null)
   // OCEAN 预设字典(用户级,companion_default 不可删)
   const presets = ref<OceanPreset[]>([])
@@ -56,7 +70,22 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
 
   // ----- getters -----
   const hasPersona = computed(() => persona.value !== null)
-  const hasTraits = computed(() => traits.value !== null)
+  const hasTraits = computed(() => traits.value.length > 0)
+
+  /**
+   * 按 presetType 查已保存的 OCEAN;找不到返回 null(前端应回退到预设基线)。
+   */
+  function findTraitsByPreset(presetType: string): OceanTraits | null {
+    return traits.value.find((t) => t.presetType === presetType) ?? null
+  }
+
+  /**
+   * 当前 active preset 对应的 OCEAN 行(如果存在)。
+   * 不存在时返回 null(通常意味着该 preset 还没被保存过,UI 应展示基线)。
+   */
+  const findActiveTraits = computed<OceanTraits | null>(() =>
+    traits.value.find((t) => t.presetType === activePresetType.value) ?? null,
+  )
 
   // ----- actions -----
   function setCurrentRoleId(roleId: number | null) {
@@ -106,13 +135,17 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
     }
   }
 
-  async function loadTraits(roleId: number): Promise<OceanTraits | null> {
+  async function loadTraits(roleId: number): Promise<OceanTraits[]> {
     loading.value = true
     try {
-      const t = await getTraits(roleId)
-      traits.value = t
+      const resp = await getTraits(roleId)
+      traits.value = resp.list
+      // 同步 active preset(后端权威)
+      if (resp.activePresetType) {
+        activePresetType.value = resp.activePresetType
+      }
       setCurrentRoleId(roleId)
-      return t
+      return resp.list
     } finally {
       loading.value = false
     }
@@ -123,13 +156,16 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
     try {
       // 三类数据并行拉:persona + traits 进各自 ref,coreSnapshot 进 ref(含 beliefs/relationship/mood)
       // 切角色时必须三件套同时刷新,否则 BeliefsTab 等子页面会显示上一角色的脏数据。
-      const [p, t, snap] = await Promise.all([
+      const [p, traitsResp, snap] = await Promise.all([
         getPersona(roleId),
         getTraits(roleId),
         loadCoreSnapshot(roleId).catch(() => null),
       ])
       persona.value = p
-      traits.value = t
+      traits.value = traitsResp.list
+      if (traitsResp.activePresetType) {
+        activePresetType.value = traitsResp.activePresetType
+      }
       if (snap !== null) {
         coreSnapshot.value = snap
       } else {
@@ -155,13 +191,31 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
     }
   }
 
+  /**
+   * 保存 OCEAN(单条预设)。
+   * 用保存响应的 preset 替换/插入到 traits 列表,保持列表按 preset 独立。
+   *
+   * 注意:保存 OCEAN 不再切换 active —— 后端职责拆分后,「保存五维性格配置」
+   * 只写五维值,「使用性格」是另一个独立动作(走 setActivePreset)。
+   * 这样用户在不改 OCEAN 的情况下也能切换当前使用的预设。
+   */
   async function saveTraits(req: OceanTraits): Promise<OceanTraits> {
     saving.value = true
     try {
       const saved = await saveTraitsApi(req)
-      traits.value = saved
-      setCurrentRoleId(req.roleId)
       if (!saved) throw new Error('OCEAN 保存返回为空')
+      // 替换/插入到列表(每个 preset 独立)
+      const idx = traits.value.findIndex((t) => t.presetType === saved.presetType)
+      if (idx >= 0) {
+        traits.value = [
+          ...traits.value.slice(0, idx),
+          saved,
+          ...traits.value.slice(idx + 1),
+        ]
+      } else {
+        traits.value = [...traits.value, saved]
+      }
+      setCurrentRoleId(req.roleId)
       return saved
     } finally {
       saving.value = false
@@ -169,76 +223,36 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
   }
 
   /**
-   * 切换预设：把 OCEAN 五维填为预设基线（不立即保存，需用户确认）。
+   * 切换当前使用的 OCEAN 预设(不动 OCEAN 五维)。
+   *
+   * 后端 upsert role_active_preset 并回写新 activePresetType —— 同步本地
+   * state 让 UI 上 chip 的"使用中"标记立即反映。
+   *
+   * 与 saveTraits 的区别:
+   *   - saveTraits:落库 OCEAN 五维(可能改得很细)
+   *   - setActivePreset:仅切 active,不改 OCEAN
    */
-  function applyPresetLocally(presetType: PresetType) {
-    const baselines: Record<PresetType, Omit<OceanTraits, 'roleId' | 'updatedAt'>> = {
-      companion_default: {
-        openness: 0.4,
-        conscientiousness: -0.1,
-        extraversion: 0.2,
-        agreeableness: 0.7,
-        neuroticism: -0.4,
-        presetType: 'companion_default',
-      },
-      rational_advisor: {
-        openness: 0.2,
-        conscientiousness: 0.7,
-        extraversion: -0.3,
-        agreeableness: 0.2,
-        neuroticism: -0.5,
-        presetType: 'rational_advisor',
-      },
-      energetic_girl: {
-        openness: 0.6,
-        conscientiousness: -0.3,
-        extraversion: 0.8,
-        agreeableness: 0.6,
-        neuroticism: -0.6,
-        presetType: 'energetic_girl',
-      },
-      gentle_senior: {
-        openness: 0.3,
-        conscientiousness: 0.4,
-        extraversion: 0.1,
-        agreeableness: 0.6,
-        neuroticism: -0.3,
-        presetType: 'gentle_senior',
-      },
-      sarcastic_friend: {
-        openness: 0.5,
-        conscientiousness: -0.2,
-        extraversion: 0.4,
-        agreeableness: -0.2,
-        neuroticism: -0.1,
-        presetType: 'sarcastic_friend',
-      },
-      psych_counselor: {
-        openness: 0.7,
-        conscientiousness: 0.6,
-        extraversion: 0,
-        agreeableness: 0.9,
-        neuroticism: -0.7,
-        presetType: 'psych_counselor',
-      },
+  async function setActivePreset(roleId: number, presetType: string): Promise<string> {
+    saving.value = true
+    try {
+      const active = await setActivePresetApi(roleId, presetType)
+      activePresetType.value = active
+      setCurrentRoleId(roleId)
+      return active
+    } finally {
+      saving.value = false
     }
-    const baseline = baselines[presetType]
-    if (!traits.value) {
-      traits.value = {
-        ...baseline,
-        roleId: currentRoleId.value ?? 0,
-      }
-    } else {
-      traits.value = {
-        ...traits.value,
-        openness: baseline.openness,
-        conscientiousness: baseline.conscientiousness,
-        extraversion: baseline.extraversion,
-        agreeableness: baseline.agreeableness,
-        neuroticism: baseline.neuroticism,
-        presetType,
-      }
-    }
+  }
+
+  /**
+   * 切换预设:在列表中查找已保存的 OCEAN。
+   *
+   * 历史上曾直接覆写 store.traits(单值),导致切预设保存时丢失旧预设的自定义值。
+   * 修复:不再覆写 traits 列表 — 列表就是权威数据源,切换只是「展示哪个 preset」。
+   * 调用方应根据返回的 saved 自行同步本地 sliders。
+   */
+  function findPreset(presetType: PresetType): OceanTraits | null {
+    return traits.value.find((t) => t.presetType === presetType) ?? null
   }
 
   async function loadCoreSnapshot(roleId: number): Promise<CoreSnapshot | null> {
@@ -255,9 +269,8 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
           return null
         }
         coreSnapshot.value = snap
-        // 顺手刷新 persona/traits 缓存
+        // 顺手刷新 persona 缓存(snap.traits 是后端选的主预设,不直接覆盖全量列表)
         if (snap.persona) persona.value = snap.persona
-        if (snap.traits) traits.value = snap.traits
         setCurrentRoleId(roleId)
         return snap
       } finally {
@@ -272,7 +285,7 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
   /** 重置当前角色的编辑上下文（切换角色时调用） */
   function reset(): void {
     persona.value = null
-    traits.value = null
+    traits.value = []
     coreSnapshot.value = null
     currentRoleId.value = null
   }
@@ -340,17 +353,21 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
     const updated = await updatePresetApi(id, req)
     if (!updated) throw new Error('修改预设失败')
     presets.value = presets.value.map((p) => (p.id === id ? updated : p))
-    // 当前 traits 的 presetType 仍指向同一 key,但其 OCEAN 值已变:
-    // 同步本地 traits 的五维,避免 UI 显示与预设不一致
-    if (traits.value && traits.value.presetType === updated.key) {
-      traits.value = {
-        ...traits.value,
-        openness: updated.openness,
-        conscientiousness: updated.conscientiousness,
-        extraversion: updated.extraversion,
-        agreeableness: updated.agreeableness,
-        neuroticism: updated.neuroticism,
-      }
+    // 若该预设当前已有 OCEAN 记录(用户曾保存过),同步更新其五维以与预设基线一致
+    const idx = traits.value.findIndex((t) => t.presetType === updated.key)
+    if (idx >= 0) {
+      traits.value = [
+        ...traits.value.slice(0, idx),
+        {
+          ...traits.value[idx],
+          openness: updated.openness,
+          conscientiousness: updated.conscientiousness,
+          extraversion: updated.extraversion,
+          agreeableness: updated.agreeableness,
+          neuroticism: updated.neuroticism,
+        },
+        ...traits.value.slice(idx + 1),
+      ]
     }
     return updated
   }
@@ -365,6 +382,7 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
     currentRoleId,
     persona,
     traits,
+    activePresetType,
     coreSnapshot,
     presets,
     presetsLoaded,
@@ -374,6 +392,8 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
     // getters
     hasPersona,
     hasTraits,
+    findTraitsByPreset,
+    findActiveTraits,
     // actions
     bootstrap,
     setCurrentRoleId,
@@ -382,7 +402,8 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
     loadAll,
     savePersona,
     saveTraits,
-    applyPresetLocally,
+    setActivePreset,
+    findPreset,
     loadCoreSnapshot,
     reset,
     addBelief,
