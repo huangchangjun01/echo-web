@@ -1,6 +1,6 @@
 # 流式聊天 UX 重构设计文档
 
-> 状态: **草案 — 待用户审阅**
+> 状态: **已用户审阅 — 进入实施计划阶段**
 > 日期: 2026-09-16
 > 范围: 三端联动（echo-web / echo-core / echo-ai）
 > 工作分支: 暂未开，建议每仓一个 feature 分支
@@ -171,14 +171,13 @@ async for content, reasoning in reply_client.small_stream(...):
         yield {"type": "delta", ...}
 yield {"type": "stage", "name": "model_reasoning", "state": "end", "ts_ms": _now_ms()}
 
-# 5. answer 阶段（**实现期确认**：建议从首条 delta 到 done 前一帧）
-yield {"type": "stage", "name": "answer", "state": "start", "ts_ms": _now_ms()}  # 在 yield 第一条 delta 之前调用
-# （delta 流式 yield 期间无额外 stage 事件，因为 model_reasoning 阶段已 start）
-yield {"type": "stage", "name": "answer", "state": "end", "ts_ms": _now_ms()}    # 在 yield done 之前调用
+# 5. answer 阶段（**已确认**：从 model_reasoning.end 到 done）
+# model_reasoning.end 之后立即 yield
+yield {"type": "stage", "name": "answer", "state": "start", "ts_ms": _now_ms()}
+# （delta 流式 yield 期间无额外 stage 事件，因为 answer 阶段已 start）
+yield {"type": "stage", "name": "answer", "state": "end", "ts_ms": _now_ms()}
 yield {"type": "done", ...}
 ```
-
-> **决策点（待确认）**：`answer.start` 是在第一条 `delta` 之前 yield，还是在 `model_reasoning.end` 之后立即 yield？建议前者（与用户可感知的「开始输出正文」对齐）。
 
 ### 4.2 文件: `llm/client.py` — `small_stream()`
 
@@ -538,14 +537,19 @@ function onError(error: ChatError) {
 
 ---
 
-## 9. 开放问题
+## 9. 决策记录
 
-### 9.1 待用户确认
+### 9.1 已确认（用户审阅）
 
-1. **`answer` 阶段边界**：从首条 delta 开始，还是从 `model_reasoning.end` 开始？**建议后者**（与现有 `done` 帧对应）。
-2. **`tool_dispatch` 阶段粒度**：每个 ReAct 迭代 start/end 一次（多次），还是整个 ReAct 循环 start/end 一次（单次）？**建议多次**（过程感更强）。
-3. **`mood_update` 频率**：每 20 个 delta chunk 一次 + 阈值 0.05 是否合适？**需要调参**。
-4. **是否需要在主答案加「重新生成」按钮**？当前 TTS/复制已有，「重新生成」是新动作。
+1. **`answer` 阶段边界**：从 `model_reasoning.end` 到 `done`（已落地到 §4.1）。
+2. **`tool_dispatch` 阶段粒度**：每个 ReAct 迭代 start/end 一次（多次，过程感更强）。
+3. **`mood_update` 频率**：每 20 个 delta chunk 一次 + 阈值 0.05，先按此实现，运行期调参。
+4. **不**增加「重新生成」按钮。MessageActions 只做：复制 / 朗读 / 👍 / 👎。
+
+### 9.2 实现期再决定
+
+- 高亮代码块的 syntax 选择（highlight.js vs prismjs）
+- 阶段进度条在 done 后是否完全隐藏（推荐是，但可配置）
 
 ### 9.2 实现期再决定
 
@@ -590,9 +594,9 @@ function onError(error: ChatError) {
 
 ---
 
-**审阅清单（用户确认后开始 implementation plan）**：
-- [ ] §3.2 事件枚举是否完整
-- [ ] §4.1 stage 触发逻辑是否符合预期
-- [ ] §6.1 组件拆分粒度是否合理
-- [ ] §9.1 四个开放问题的答案
-- [ ] §7 灰度上线顺序是否符合发布计划
+**审阅清单**：
+- [x] §3.2 事件枚举是否完整 — 用户确认
+- [x] §4.1 stage 触发逻辑是否符合预期 — 用户确认
+- [x] §6.1 组件拆分粒度是否合理 — 用户确认
+- [x] §9.1 四个开放问题的答案 — 用户确认（详见 §9.1）
+- [x] §7 灰度上线顺序是否符合发布计划 — 用户确认
