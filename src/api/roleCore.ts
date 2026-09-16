@@ -230,16 +230,19 @@ export async function submitFeedback(req: SubmitFeedbackReq): Promise<void> {
 // ==================== OCEAN 预设字典 ====================
 
 /**
- * 列出当前用户的预设。后端在首次访问时自动种子默认 6 个。
+ * 列出某 (user, role) 的所有预设。后端在首次访问时自动种子默认 6 个。
+ *
+ * 角色隔离后必须传 roleId —— 预设按 (user, role) 隔离,不同角色看到的
+ * 预设字典可能完全不同。
  */
-export async function listPresets(): Promise<OceanPreset[]> {
+export async function listPresets(roleId: number): Promise<OceanPreset[]> {
   const env = asEnvelope<OceanPreset[]>(
-    await request.get('/role-core/presets'),
+    await request.get('/role-core/presets', { params: { roleId } }),
   )
   return unwrap<OceanPreset[]>(env) ?? []
 }
 
-/** 新增预设。Key 由前端生成(小写字母/数字/_/-)。 */
+/** 新增预设。Key 由前端生成(小写字母/数字/_/-)。req 中必带 roleId。 */
 export async function createPreset(req: CreatePresetReq): Promise<OceanPreset | null> {
   const env = asEnvelope<OceanPreset>(
     await request.post('/role-core/presets', req),
@@ -247,7 +250,7 @@ export async function createPreset(req: CreatePresetReq): Promise<OceanPreset | 
   return unwrap<OceanPreset>(env)
 }
 
-/** 修改预设(label/description/OCEAN)。Key 与 isProtected 不可改。 */
+/** 修改预设(label/description/OCEAN)。Key 与 isProtected 不可改。req 中必带 roleId。 */
 export async function updatePreset(id: number, req: UpdatePresetReq): Promise<OceanPreset | null> {
   const env = asEnvelope<OceanPreset>(
     await request.put(`/role-core/presets/${id}`, req),
@@ -255,10 +258,10 @@ export async function updatePreset(id: number, req: UpdatePresetReq): Promise<Oc
   return unwrap<OceanPreset>(env)
 }
 
-/** 删除预设。isProtected=true 的预设会被后端拒绝(400)。 */
-export async function deletePreset(id: number): Promise<void> {
+/** 删除预设。isProtected=true 的预设会被后端拒绝(400)。roleId 必传 —— 路径或 query。 */
+export async function deletePreset(id: number, roleId: number): Promise<void> {
   const env = asEnvelope<null>(
-    await request.delete(`/role-core/presets/${id}`),
+    await request.delete(`/role-core/presets/${id}`, { params: { roleId } }),
   )
   unwrap(env)
 }

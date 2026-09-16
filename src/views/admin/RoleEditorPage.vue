@@ -33,6 +33,7 @@
       <el-tab-pane label="人格" name="persona">
         <PersonaTab
           v-if="persona"
+          :key="`persona-${roleId}`"
           :model-value="persona"
           @update:model-value="onPersonaUpdate"
           @save="onPersonaSave"
@@ -49,6 +50,7 @@
       <el-tab-pane label="性格" name="traits">
         <TraitsTab
           v-if="traits"
+          :key="`traits-${roleId}`"
           :model-value="traits"
           @update:model-value="onTraitsUpdate"
           @preset-change="onPresetChange"
@@ -136,11 +138,21 @@ const selectorPlaceholder = computed(() => {
   return '请选择角色'
 })
 
-const persona = computed<RolePersona | null>(() =>
-  store.persona && store.persona.roleId === roleId.value
-    ? store.persona
-    : store.persona,
-)
+/**
+ * 当前角色的人格快照。
+ *
+ * 历史 bug:旧实现三元表达式两个分支都返回 store.persona,导致即便 persona
+ * 属于另一个角色也被原样返回。配合 TraitsTab 的 local 仅在挂载时初始化,
+ * 切换角色时人格 Tab 也会展示旧角色的人格。
+ *
+ * 修复:用 store.currentRoleId 作为「后端已确认加载完成」的角色 ID 镜像,
+ * 与 URL roleId 不一致时返回 null,触发 PersonaTab 卸载 + 空态,
+ * 等 loadAll 完成后再用新 modelValue 重新挂载。
+ */
+const persona = computed<RolePersona | null>(() => {
+  if (!store.currentRoleId || store.currentRoleId !== roleId.value) return null
+  return store.persona
+})
 /**
  * 当前激活的预设 key —— 切 tab 后是否保留 chip 高亮在此决定。
  *
@@ -290,6 +302,24 @@ watch(
  * 的值,看起来像是 chip 被重置。
  */
 const traits = computed<OceanTraits | null>(() => {
+  // 角色切换闸门(关键修复):
+  //   store.loadAll 是异步的 —— 从 roleId 在 URL 上变,到 store.traits /
+  //   store.activePresetType / store.currentRoleId 被新角色数据覆盖,中间
+  //   有数百毫秒空窗。不加闸门的话,computed 在空窗内会用旧 store.traits 算出
+  //   「roleId 是新、OCEAN 是旧」的不一致数据传给 TraitsTab。
+  //
+  //   而 TraitsTab 的 local 仅在挂载时初始化,后续刷新依赖 watch presetType
+  //   —— 当两个角色恰好使用同一个 active preset key(典型场景:都用
+  //   companion_default),切角色时 presetType 不变,watcher 不触发,local 永远
+  //   停留在旧角色的 OCEAN 值上 →「切换角色后五维性格不变化」bug 的根因。
+  //
+  //   修复:store.currentRoleId 是「后端已确认加载完成」的角色 ID 镜像(loadAll
+  //   末尾的 setCurrentRoleId 同步写入)。与 URL roleId 不一致说明还在加载中,
+  //   此时返回 null 触发 TraitsTab 卸载(v-if=false → 显示「角色 xxx 还
+  //   没有 OCEAN 五维性格」空态),等 loadAll 完成、store.currentRoleId 同步后
+  //   重新挂载,新 mount 时 local 从新 modelValue 初始化,五维自然反映新角色。
+  if (!store.currentRoleId || store.currentRoleId !== roleId.value) return null
+
   const presetKey = activePresetType.value || 'companion_default'
   // 1) 列表中有匹配 → 用用户已保存的自定义值
   const matched = store.traits.find((t) => t.presetType === presetKey)
@@ -400,10 +430,8 @@ onMounted(async () => {
     }
   }
   store.bootstrap()
-  // 预加载预设字典 —— 让 traits computed 在 TraitsTab 挂载前也能用预设基线
-  // 兜底(用户首次进编辑器但 store.presets 还没被 TraitsTab 加载的情况)。
-  // 失败静默忽略:TraitsTab 自己也会加载一次。
-  store.loadPresets().catch(() => {})
+  // mount 时强制 reload —— ensureLoaded → store.loadAll → getTraits,
+  // 预设字典随 getTraits 响应一并带回,不再单独调 store.loadPresets()。
   // mount 时强制 reload —— 确保 store.activePresetType 反映后端最新状态,
   // 修复「跨页面导航后 personality 页不显示当前使用中的性格」bug
   await ensureLoaded(true)

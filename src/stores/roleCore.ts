@@ -42,6 +42,12 @@ import {
 const inflightCoreSnapshots = new Map<number, Promise<CoreSnapshot | null>>()
 const STORAGE_ROLE_ID = 'echo_role_core_role_id'
 
+/**
+ * loadAll 调用计数器 —— 详见 loadAll 内注释。
+ * 模块级闭包变量,每次 loadAll 调用前自增,用以识别「本次调用是否仍是最新一次」。
+ */
+let loadAllGen = 0
+
 export const useRoleCoreStore = defineStore('roleCore', () => {
   // ----- state -----
   const currentRoleId = ref<number | null>(null)
@@ -144,6 +150,12 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
       if (resp.activePresetType) {
         activePresetType.value = resp.activePresetType
       }
+      // 性格页重构:预设字典也由 getTraits 一并带回,前端不再单独调 /presets。
+      // 后端在首次访问会自动种子默认 6 个,所以这里总是非空。
+      if (resp.presets && resp.presets.length > 0) {
+        presets.value = resp.presets
+        presetsLoaded.value = true
+      }
       setCurrentRoleId(roleId)
       return resp.list
     } finally {
@@ -152,6 +164,16 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
   }
 
   async function loadAll(roleId: number): Promise<void> {
+    // Generation counter:在快速来回切换角色时(如 A→B→A→B),
+    // 多次 loadAll 并发执行,完成顺序不保证。若一个较老的 loadAll
+    // 在较新的之后才回, 它会把 store 写回旧角色数据,导致
+    // store.currentRoleId 与 store.traits 不一致(URL 显示 B,
+    // store 实际是 A 的数据) → traits computed 闸门看似通过
+    // 但用旧数据算出 modelValue,TraitsTab 显示旧 OCEAN → bug。
+    //
+    // 修复:每次 loadAll 入口自增 generation,只有 generation 仍是最新
+    // 的那次 loadAll 才允许写入 store。后启动的覆盖先启动的写入权。
+    const gen = ++loadAllGen
     loading.value = true
     try {
       // 三类数据并行拉:persona + traits 进各自 ref,coreSnapshot 进 ref(含 beliefs/relationship/mood)
@@ -161,10 +183,18 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
         getTraits(roleId),
         loadCoreSnapshot(roleId).catch(() => null),
       ])
+      // 后启动的 loadAll 已经把 generation 推高,本批响应作废丢弃。
+      // 注意:仍需让 loading 转回 false(下方 finally),否则会卡死。
+      if (gen !== loadAllGen) return
       persona.value = p
       traits.value = traitsResp.list
       if (traitsResp.activePresetType) {
         activePresetType.value = traitsResp.activePresetType
+      }
+      // 性格页重构:预设字典也由 getTraits 一并带回,前端不再单独调 /presets
+      if (traitsResp.presets && traitsResp.presets.length > 0) {
+        presets.value = traitsResp.presets
+        presetsLoaded.value = true
       }
       if (snap !== null) {
         coreSnapshot.value = snap
@@ -174,7 +204,10 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
       }
       setCurrentRoleId(roleId)
     } finally {
-      loading.value = false
+      // 只在「本次 loadAll 仍是最新一次」时清 loading,
+      // 否则保留 loading=true,直到最后一次 loadAll 完成才翻回 false
+      // —— 避免 UI 在两次切换之间闪一下「未加载完」状态。
+      if (gen === loadAllGen) loading.value = false
     }
   }
 
@@ -271,7 +304,12 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
         coreSnapshot.value = snap
         // 顺手刷新 persona 缓存(snap.traits 是后端选的主预设,不直接覆盖全量列表)
         if (snap.persona) persona.value = snap.persona
-        setCurrentRoleId(roleId)
+        // 注意:此处不调用 setCurrentRoleId。
+        // loadCoreSnapshot 是 loadAll 的三件套之一,Promise.all 的完成顺序不保证,
+        // 若 loadCoreSnapshot 先于 getTraits 完成,把 currentRoleId 提前更新,
+        // RoleEditorPage 的 traits/persona computed 闸门会「假性通过」并用旧 store.traits
+        // 算出 stale modelValue →「切角色后 OCEAN 不变化」bug 的隐藏成因。
+        // currentRoleId 由 loadAll 在末尾统一写入(它完成了三件套全部同步)。
         return snap
       } finally {
         inflightCoreSnapshots.delete(roleId)
@@ -329,14 +367,21 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
   // ===== OCEAN 预设字典 CRUD =====
 
   /**
-   * 拉取当前用户的预设列表。后端首次访问会种子默认 6 个。
-   * 同 roleId 并发请求去重,避免重复网络往返(类似 loadCoreSnapshot)。
+   * 拉取某 (user, role) 的预设列表。后端首次访问会种子默认 6 个。
+   *
+   * 角色隔离后:loadTraits 已经把预设字典塞进 TraitsListResponse.presets
+   * 一并带回,所以这里的 loadPresets 实际上是「按需单独再拉一次」的兜底入口
+   * (例如创建/删除 preset 后单独刷新)。同 roleId 并发请求去重,避免重复网络往返
+   * (类似 loadCoreSnapshot)。
+   *
+   * 注意:loadPresets 不再合并到 loadAll —— 切角色时 loadTraits 已带回 presets。
+   * 调用方(典型为 TraitsTab 手动刷新)需自己传 roleId。
    */
-  async function loadPresets(force = false): Promise<OceanPreset[]> {
+  async function loadPresets(roleId: number, force = false): Promise<OceanPreset[]> {
     if (presetsLoaded.value && !force && presets.value.length > 0) {
       return presets.value
     }
-    const list = await listPresetsApi()
+    const list = await listPresetsApi(roleId)
     presets.value = list
     presetsLoaded.value = true
     return list
@@ -372,8 +417,8 @@ export const useRoleCoreStore = defineStore('roleCore', () => {
     return updated
   }
 
-  async function removePreset(id: number): Promise<void> {
-    await deletePresetApi(id)
+  async function removePreset(id: number, roleId: number): Promise<void> {
+    await deletePresetApi(id, roleId)
     presets.value = presets.value.filter((p) => p.id !== id)
   }
 

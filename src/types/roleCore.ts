@@ -74,10 +74,16 @@ export interface OceanTraits {
  *
  * isProtected=true 表示标准陪伴等系统级预设：仅允许修改数值/标签,不允许删除。
  * key 由前端生成（小写字母/数字/_/-，1~64），作为 OCEAN traits 写入时的 presetType 标识符。
+ *
+ * 角色隔离后:预设字典按 (user, role) 隔离,roleId 用于：
+ *   - 前端区分「同名 key 但属于不同角色」的情况
+ *   - 创建/更新/删除预设时作为入参传给后端
+ *   - active 徽标判定时与当前选中 roleId 对比
  */
 export interface OceanPreset {
   id: number
   userId: number
+  roleId: number
   key: string
   label: string
   description: string
@@ -91,8 +97,9 @@ export interface OceanPreset {
   updatedAt?: string
 }
 
-/** 新增预设请求体 */
+/** 新增预设请求体 — 角色隔离后必须传 roleId */
 export interface CreatePresetReq {
+  roleId: number
   key: string
   label: string
   description?: string
@@ -111,8 +118,9 @@ export interface UpdateBeliefReq {
   source?: string
 }
 
-/** 修改预设请求体(key/isProtected 不可改) */
+/** 修改预设请求体(key/isProtected 不可改) — 角色隔离后必须传 roleId */
 export interface UpdatePresetReq {
+  roleId: number
   label: string
   description?: string
   openness: number
@@ -176,16 +184,21 @@ export interface CoreSnapshot {
 /**
  * OCEAN 五维列表响应（GET /api/role-core/traits）。
  *
- * 与早期直接返回 OceanTraits[] 不同,现在包成对象,带上当前生效的 preset:
+ * 与早期直接返回 OceanTraits[] 不同,现在包成对象,带上当前生效的 preset 与预设字典:
  *   - list: 该 (user, role) 下所有已保存预设的 OCEAN 五维(每个 preset 一行)
  *   - activePresetType: 当前真正生效的预设 key(决定 chat 回复时读的 OCEAN)
+ *   - presets: 该用户下的 OCEAN 预设字典(用户级)。性格页重构后一次 GET 拿全,
+ *     前端不再单独调 /role-core/presets,直接用本字段渲染 chip + active 徽标
  *
- * 历史演进:曾直接返回 OceanTraits[],新增「当前使用」跟踪后改为对象形式。
- * 前端按此结构解析。
+ * 历史演进:
+ *   - v1:直接返回 OceanTraits[] → 切换预设时值互窜的 bug
+ *   - v2:加 activePresetType → 「当前使用」跟踪
+ *   - v3(v3):加 presets → 性格页一次 GET 拿全
  */
 export interface TraitsListResponse {
   list: OceanTraits[]
   activePresetType: string
+  presets: OceanPreset[]
 }
 
 /**

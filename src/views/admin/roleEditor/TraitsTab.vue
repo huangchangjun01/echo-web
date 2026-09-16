@@ -249,6 +249,43 @@ watch(
   },
 )
 
+/**
+ * 跨角色兜底同步:即使 props.modelValue.presetType 没变(典型场景:两个角色
+ * 都使用 companion_default),只要 props.modelValue.roleId 变了,就把 local
+ * 的五维一并替换为新角色对应 preset 的保存值(或预设基线)。
+ *
+ * 这是「切换角色后五维性格不变化」bug 的第三层防线 —— 父级已经用 v-if + :key
+ * 双保险强制 remount,正常路径下根本到不了这里;但万一某个新引入的代码改动
+ * 让组件被复用(如 el-tab-pane lazy、KeepAlive、第三方缓存层),这一层能兜住
+ * 「props 变了、presetType 没变、local 没刷」的所有漏网情况。
+ */
+watch(
+  () => props.modelValue.roleId,
+  (newRoleId, oldRoleId) => {
+    if (newRoleId === oldRoleId) return
+    const presetKey = props.modelValue.presetType
+    const saved = store.findTraitsByPreset(presetKey)
+    if (saved) {
+      // 用同 preset 下新角色的已保存五维覆盖(同 preset 在不同角色下可有不同值)
+      Object.assign(local, saved)
+    } else {
+      // 新角色该 preset 未保存 → 套预设基线
+      const presetDef = store.presets.find((p) => p.key === presetKey)
+      if (presetDef) {
+        Object.assign(local, {
+          roleId: newRoleId,
+          openness: presetDef.openness,
+          conscientiousness: presetDef.conscientiousness,
+          extraversion: presetDef.extraversion,
+          agreeableness: presetDef.agreeableness,
+          neuroticism: presetDef.neuroticism,
+          presetType: presetKey,
+        })
+      }
+    }
+  },
+)
+
 const currentPreset = computed<OceanPreset | null>(
   () => store.presets.find((p) => p.key === local.presetType) ?? null,
 )
@@ -410,6 +447,7 @@ async function onSubmitDialog() {
     }
     try {
       const created = await store.createPreset({
+        roleId: props.modelValue.roleId,
         key: form.key.trim(),
         label: form.label.trim(),
         description: form.description.trim(),
@@ -432,6 +470,7 @@ async function onSubmitDialog() {
     }
     try {
       await store.updatePreset(editingId.value, {
+        roleId: props.modelValue.roleId,
         label: form.label.trim(),
         description: form.description.trim(),
         openness: form.openness,
@@ -464,7 +503,7 @@ async function onDeleteChip(p: OceanPreset) {
     return
   }
   try {
-    await store.removePreset(p.id)
+    await store.removePreset(p.id, props.modelValue.roleId)
     // 如果删除的是当前预设,回落第一个 protected(优先 companion_default),否则回第一个
     if (local.presetType === p.key) {
       const fallback = store.presets.find((x) => x.isProtected) ?? store.presets[0]
@@ -477,14 +516,9 @@ async function onDeleteChip(p: OceanPreset) {
   }
 }
 
-// 首次挂载时拉预设字典
-;(async () => {
-  try {
-    await store.loadPresets()
-  } catch {
-    // 静默:TraitsTab 即使无预设也能展示 sliders
-  }
-})()
+// 首次挂载时拉预设字典 —— 性格页重构后,预设字典已由 store.loadAll →
+// getTraits 响应一并带回,TraitsTab 不再单独调 store.loadPresets()。
+// 保留空注释作为锚点,提醒后续维护者此处曾有副作用逻辑(避免误删)。
 </script>
 
 <style scoped>
