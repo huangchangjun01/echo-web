@@ -51,6 +51,12 @@ const hasAnyStageActivity = computed(() =>
     <StageProgress
       v-if="hasAnyStageActivity"
       :stage-state="message.stageState ?? DEFAULT_STAGE_STATE"
+      :thinkings="message.thinkings"
+      :tool-calls="message.toolCalls"
+      :memory-recall="message.memoryRecall"
+      :context="message.context"
+      :streaming-reasoning="streamingReasoning"
+      :answer="message.content"
     />
     <ChatMarkdown :source="message.content" />
     <ThoughtPanel
