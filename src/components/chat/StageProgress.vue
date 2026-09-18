@@ -38,7 +38,7 @@ function iconFor(name: StageName, state: StageState): string {
   flex: 1; font-size: 11px; padding: 7px 4px; border-radius: 999px;
   text-align: center; transition: background-color .3s, color .3s, box-shadow .3s;
 }
-.stage-chip.stage-idle { background: rgba(255,255,255,0.5); color: #d4a78a; }
+.stage-chip.stage-idle { background: rgba(255, 138, 102, 0.15); color: #a05a3a; }
 .stage-chip.stage-running {
   background: #ff8a65; color: #fff; font-weight: 600;
   box-shadow: 0 0 0 4px rgba(255,138,102,0.25);

@@ -83,6 +83,10 @@ export const useChatStore = defineStore('chat', () => {
   const liveEmotion = ref<EmotionChange | null>(null)
   /** M3: 流式关系值变化帧（v2 SSE relation_change） */
   const liveRelation = ref<RelationChange | null>(null)
+  /** 当前正在打字机/流式输出的 assistant 消息 id。
+   *  - 用于 StreamingBubble 的 isStreaming 判定
+   *  - 必须放在 store 里才能让 :is-streaming 绑定生效（v2 UI 修复） */
+  const streamingMessageId = ref<string | null>(null)
 
   /**
    * 实际发送到后端的 sessionId。
@@ -333,10 +337,25 @@ export const useChatStore = defineStore('chat', () => {
    * M3:更新某阶段的运行状态(SSE `stage` 帧)。
    * - state='running' 时同步记录 currentStage
    * - state='done' / 'skipped' / 'idle' 只更新状态映射,不修改 currentStage
+   * - 提供 messageId 时,同时把状态写入到对应 Message.stageState,
+   *   让 StageProgress 能按消息维度读取(而不是只读到全局 map)
    */
-  function setStageState(name: StageName, state: StageState) {
+  function setStageState(name: StageName, state: StageState, messageId?: string | null) {
     stageState.value[name] = state
     if (state === 'running') currentStage.value = name
+    if (messageId) {
+      const session = sessions.value.find((s) => s.id === currentSessionId.value)
+      const msg = session?.messages.find((m) => m.id === messageId)
+      if (msg) {
+        if (!msg.stageState) msg.stageState = { ...DEFAULT_STAGE_STATE }
+        msg.stageState[name] = state
+      }
+    }
+  }
+
+  /** 设置当前正在流式输出的 assistant 消息 id（v2 UI 修复） */
+  function setStreamingMessageId(id: string | null) {
+    streamingMessageId.value = id
   }
 
   /**
@@ -420,11 +439,13 @@ export const useChatStore = defineStore('chat', () => {
     liveMood,
     liveEmotion,
     liveRelation,
+    streamingMessageId,
     setStageState,
     resetStageState,
     setLiveMood,
     setLiveEmotion,
     setLiveRelation,
+    setStreamingMessageId,
   }
 })
 

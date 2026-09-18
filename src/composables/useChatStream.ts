@@ -53,8 +53,10 @@ export function useChatStream() {
 
     const opts: SendChatStreamOptions = {
       signal: ctrl.signal,
-      onStageStart: (name) => chat.setStageState(name, 'running'),
-      onStageEnd: (name) => chat.setStageState(name, 'done'),
+      onStageStart: (name) =>
+        chat.setStageState(name, 'running', chat.streamingMessageId ?? undefined),
+      onStageEnd: (name) =>
+        chat.setStageState(name, 'done', chat.streamingMessageId ?? undefined),
       onMoodUpdate: (m) => chat.setLiveMood(m),
       onEmotionChange: (e) => chat.setLiveEmotion(e),
       onRelationChange: (r) => chat.setLiveRelation(r),

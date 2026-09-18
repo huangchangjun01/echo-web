@@ -653,8 +653,6 @@ const speakingId = ref<string | null>(null)
 const shouldResumeListening = ref(false)
 
 /* ---- 流式状态：StreamingBubble 需要的本地 ref ---- */
-/** 当前正在打字机/流式输出的 assistant 消息 id（StreamingBubble 用它判断 caret 与面板展开） */
-const streamingMessageId = ref<string | null>(null)
 /** model_reasoning 阶段的实时打字机文本（DeepSeek 风格思考面板） */
 const streamingReasoningText = ref('')
 /** 装饰性即时回应（presence）：首字到达前在 assistant 气泡内展示，随后清空 */
@@ -1035,7 +1033,7 @@ async function handleSend() {
   const lastMsg = session.messages[session.messages.length - 1]
   lastMsg.content = ''
 
-  streamingMessageId.value = assistantMsg.id
+  chatStore.setStreamingMessageId(assistantMsg.id)
 
   startTypewriter((chunk) => {
     lastMsg.content += chunk
@@ -1108,7 +1106,7 @@ async function handleSend() {
         })
         stopReasoningTypewriter(true)
         presenceText.value = ''
-        streamingMessageId.value = null
+        chatStore.setStreamingMessageId(null)
         chatStore.isStreaming = false
         const shouldSpeak =
           (autoPlay.value || (chatMode.value === 'pixel' && pixelAutoListen.value)) &&
@@ -1127,7 +1125,7 @@ async function handleSend() {
           lastMsg.content += rest
         })
         stopReasoningTypewriter(true)
-        streamingMessageId.value = null
+        chatStore.setStreamingMessageId(null)
         chatStore.isStreaming = false
         ElMessage.error(`请求失败: ${error.message}`)
         resumeListeningIfNeeded()
@@ -1142,7 +1140,7 @@ function handleStop() {
   const lastMsg = session?.messages[session.messages.length - 1]
   stopTypewriter(true, lastMsg ? (rest) => (lastMsg.content += rest) : undefined)
   stopReasoningTypewriter(true)
-  streamingMessageId.value = null
+  chatStore.setStreamingMessageId(null)
   chatStore.isStreaming = false
   resumeListeningIfNeeded()
 }
