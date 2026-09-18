@@ -82,60 +82,88 @@ function reasoningText(): string {
   ).trim()
 }
 
-interface PopoverEntry {
+interface PopoverBlock {
+  /** 块标题（如"思考"、"人格"、"L0 核心记忆"） */
   label: string
-  text: string
+  /** 块副标题（可选，如计数） */
+  meta?: string
+  /** 块种类 */
+  kind: 'text' | 'list'
+  /** kind='text' 时使用 */
+  text?: string
+  /** kind='list' 时使用 */
+  items?: string[]
 }
 
-const popoverEntries = computed<PopoverEntry[]>(() => {
+const popoverEntries = computed<PopoverBlock[]>(() => {
   const stage = openStage.value
   if (!stage) return []
 
-  const out: PopoverEntry[] = []
+  const out: PopoverBlock[] = []
 
   if (stage === 'intent') {
     const ts = thinkingsFor('intent')
-    if (ts.length) {
-      out.push({ label: '思考', text: ts.map((t) => t.text).join('\n\n') })
+    out.push({
+      label: '思考',
+      kind: 'text',
+      text: ts.length ? ts.map((t) => t.text).join('\n\n') : '（该阶段未产生思考文本）',
+    })
+
+    const ctx = props.context
+    if (ctx) {
+      // 人格块
+      out.push({
+        label: '人格',
+        meta: `长度 ${ctx.personaLen}`,
+        kind: ctx.persona ? 'text' : 'list',
+        text: ctx.persona || undefined,
+        items: ctx.persona ? undefined : ['（本轮未注入人格原文）'],
+      })
+      // L0 块
+      out.push({
+        label: 'L0 核心记忆',
+        meta: `${ctx.l0Count} 条`,
+        kind: ctx.l0Items?.length ? 'list' : 'text',
+        text: ctx.l0Items?.length ? undefined : '（本轮未注入 L0 详情，仅计数）',
+        items: ctx.l0Items && ctx.l0Items.length ? ctx.l0Items : undefined,
+      })
+      // L1 块
+      out.push({
+        label: 'L1 近期摘要',
+        meta: `${ctx.l1Count} 条`,
+        kind: ctx.l1Items?.length ? 'list' : 'text',
+        text: ctx.l1Items?.length ? undefined : '（本轮未注入 L1 详情，仅计数）',
+        items: ctx.l1Items && ctx.l1Items.length ? ctx.l1Items : undefined,
+      })
     } else {
-      out.push({ label: '思考', text: '（该阶段未产生思考文本）' })
-    }
-    if (props.context) {
-      const ctx = props.context
-      const lines: string[] = []
-      lines.push(`人格长度：${ctx.personaLen}`)
-      lines.push(`L0 核心记忆：${ctx.l0Count}`)
-      lines.push(`L1 近期摘要：${ctx.l1Count}`)
-      if (ctx.persona) lines.push(`\n— 人格片段 —\n${ctx.persona}`)
-      if (ctx.l0Items?.length) lines.push(`\n— L0 记忆条目 —\n${ctx.l0Items.join('\n')}`)
-      if (ctx.l1Items?.length) lines.push(`\n— L1 摘要条目 —\n${ctx.l1Items.join('\n')}`)
-      out.push({ label: '上下文', text: lines.join('\n') })
+      out.push({ label: '上下文', kind: 'text', text: '（无 context 数据）' })
     }
     return out
   }
 
   if (stage === 'recall_search') {
     const ts = thinkingsFor('recall_search')
-    if (ts.length) {
-      out.push({ label: '思考', text: ts.map((t) => t.text).join('\n\n') })
+    out.push({
+      label: '思考',
+      kind: 'text',
+      text: ts.length ? ts.map((t) => t.text).join('\n\n') : '（该阶段未产生思考文本）',
+    })
+
+    const mr = props.memoryRecall
+    if (!mr) {
+      out.push({ label: '召回命中', kind: 'text', text: '（无召回数据）' })
+    } else if (mr.hits.length === 0) {
+      out.push({ label: '召回命中', meta: `${mr.count} 条`, kind: 'text', text: '共 0 条命中（无详情）' })
     } else {
-      out.push({ label: '思考', text: '（该阶段未产生思考文本）' })
-    }
-    if (props.memoryRecall) {
-      const mr = props.memoryRecall
-      if (mr.hits.length === 0) {
-        out.push({ label: '召回命中', text: `共 ${mr.count} 条命中（无详情）` })
-      } else {
-        const hits = mr.hits
-          .map(
-            (h, i) =>
-              `${i + 1}. ${h.topic}\n   ${h.summary}\n   相似度 ${h.similarity.toFixed(2)} · ${h.memoryId}`,
-          )
-          .join('\n\n')
-        out.push({ label: `召回命中 (${mr.count})`, text: hits })
-      }
-    } else {
-      out.push({ label: '召回命中', text: '（无召回数据）' })
+      out.push({
+        label: '召回命中',
+        meta: `${mr.count} 条`,
+        kind: 'list',
+        items: mr.hits.map(
+          (h, i) =>
+            `${i + 1}. ${h.topic}\n   ${h.summary}\n   相似度 ${h.similarity.toFixed(2)} · ${h.memoryId}`,
+        ),
+      })
     }
     return out
   }
@@ -143,15 +171,16 @@ const popoverEntries = computed<PopoverEntry[]>(() => {
   if (stage === 'tool_dispatch') {
     const tcs = props.toolCalls ?? []
     if (tcs.length === 0) {
-      out.push({ label: '工具调用', text: '（该阶段未调用工具）' })
+      out.push({ label: '工具调用', kind: 'text', text: '（该阶段未调用工具）' })
     } else {
-      const lines = tcs
-        .map(
-          (tc) =>
-            `${tc.ok ? '✓' : '✗'} ${tc.name}（第 ${tc.iter} 轮）\n   ${tc.summary}`,
-        )
-        .join('\n\n')
-      out.push({ label: `工具调用 (${tcs.length})`, text: lines })
+      out.push({
+        label: '工具调用',
+        meta: `${tcs.length} 次`,
+        kind: 'list',
+        items: tcs.map(
+          (tc) => `${tc.ok ? '✓' : '✗'} ${tc.name}（第 ${tc.iter} 轮）\n   ${tc.summary}`,
+        ),
+      })
     }
     return out
   }
@@ -160,6 +189,7 @@ const popoverEntries = computed<PopoverEntry[]>(() => {
     const txt = reasoningText()
     out.push({
       label: props.streamingReasoning ? '推理（实时）' : '推理',
+      kind: 'text',
       text: txt || '（该阶段未产生推理文本）',
     })
     return out
@@ -167,10 +197,7 @@ const popoverEntries = computed<PopoverEntry[]>(() => {
 
   if (stage === 'answer') {
     const txt = (props.answer ?? '').trim()
-    out.push({
-      label: '回答',
-      text: txt || '（尚未生成回答）',
-    })
+    out.push({ label: '回答', kind: 'text', text: txt || '（尚未生成回答）' })
     return out
   }
 
@@ -202,8 +229,14 @@ const popoverEntries = computed<PopoverEntry[]>(() => {
       <div class="stage-popover-inner">
         <div v-if="popoverEntries.length === 0" class="popover-empty">该阶段无数据</div>
         <div v-for="(entry, idx) in popoverEntries" :key="idx" class="popover-section">
-          <div class="popover-section-label">{{ entry.label }}</div>
-          <pre class="popover-section-text">{{ entry.text }}</pre>
+          <div class="popover-section-head">
+            <span class="popover-section-label">{{ entry.label }}</span>
+            <span v-if="entry.meta" class="popover-section-meta">{{ entry.meta }}</span>
+          </div>
+          <pre v-if="entry.kind === 'text'" class="popover-section-text">{{ entry.text }}</pre>
+          <ol v-else class="popover-section-list">
+            <li v-for="(item, i) in entry.items" :key="i" class="popover-section-item">{{ item }}</li>
+          </ol>
         </div>
       </div>
     </div>
@@ -304,19 +337,62 @@ const popoverEntries = computed<PopoverEntry[]>(() => {
   color: #a06a4a;
   font-style: italic;
 }
+.popover-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed rgba(255, 138, 102, 0.25);
+}
 .popover-section-label {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   color: #ff8a65;
-  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.popover-section-meta {
+  font-size: 10px;
+  color: #c4a78a;
 }
 .popover-section-text {
   margin: 0;
+  padding: 8px 10px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
   color: #5a3a2a;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
+  background: rgba(255, 138, 102, 0.06);
+  border-radius: 6px;
+}
+.popover-section-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.popover-section-item {
+  position: relative;
+  padding: 8px 10px 8px 26px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #5a3a2a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(255, 138, 102, 0.06);
+  border-radius: 6px;
+  border-left: 2px solid rgba(255, 138, 102, 0.4);
+}
+.popover-section-item::before {
+  content: '·';
+  position: absolute;
+  left: 12px;
+  top: 6px;
+  color: #ff8a65;
+  font-weight: 700;
 }
 </style>
