@@ -10,12 +10,25 @@ import type {
   ChatSession,
   ChatThinkingEvent,
   ChatToolCall,
+  EmotionChange,
   Message,
+  RelationChange,
+  StageName,
+  StageState,
 } from '@/types/chat'
 import { getClientIP } from '@/api/chat'
 import { useAuthStore } from '@/stores/auth'
 
 const DEFAULT_MODEL = import.meta.env.VITE_DEFAULT_CHAT_MODEL || 'gpt-4o'
+
+/** 兜底 stage 状态：所有阶段都 idle，供 resetStageState 与首屏默认值使用 */
+export const DEFAULT_STAGE_STATE: Record<StageName, StageState> = {
+  intent: 'idle',
+  recall_search: 'idle',
+  tool_dispatch: 'idle',
+  model_reasoning: 'idle',
+  answer: 'idle',
+}
 
 /** 持久化 key：当前登录用户在 chat 维度的 sessionId。
  *  - 已登录时 == authStore.sessionId（与后端登录返回值一致）
@@ -60,6 +73,16 @@ export const useChatStore = defineStore('chat', () => {
   const currentMood = ref<ChatMoodUpdate | null>(null)
   /** M2: 当前对话角色的关系值（intimacy 进度条用） */
   const currentIntimacy = ref<number>(0)
+  /** M3: 五阶段状态机（驱动 StageProgress 进度条） */
+  const stageState = ref<Record<StageName, StageState>>({ ...DEFAULT_STAGE_STATE })
+  /** M3: 当前正在运行的阶段（用于 in-flight 高亮） */
+  const currentStage = ref<StageName | null>(null)
+  /** M3: 流式心情快照（v2 SSE 帧，区别于 M2 全局 currentMood） */
+  const liveMood = ref<ChatMoodUpdate | null>(null)
+  /** M3: 流式情绪变化帧（v2 SSE emotion_change） */
+  const liveEmotion = ref<EmotionChange | null>(null)
+  /** M3: 流式关系值变化帧（v2 SSE relation_change） */
+  const liveRelation = ref<RelationChange | null>(null)
 
   /**
    * 实际发送到后端的 sessionId。
@@ -306,6 +329,48 @@ export const useChatStore = defineStore('chat', () => {
     currentMood.value = mood
   }
 
+  /**
+   * M3:更新某阶段的运行状态(SSE `stage` 帧)。
+   * - state='running' 时同步记录 currentStage
+   * - state='done' / 'skipped' / 'idle' 只更新状态映射,不修改 currentStage
+   */
+  function setStageState(name: StageName, state: StageState) {
+    stageState.value[name] = state
+    if (state === 'running') currentStage.value = name
+  }
+
+  /**
+   * M3:重置阶段状态机(新一轮流式开始前调用)。
+   * - stageState 回到全部 idle
+   * - currentStage 清空
+   */
+  function resetStageState() {
+    stageState.value = { ...DEFAULT_STAGE_STATE }
+    currentStage.value = null
+  }
+
+  /**
+   * M3:写入流式心情快照(SSE `mood_update` v2 帧)。
+   * 与 M2 `currentMood` 的区别:这里存的是增量帧,供 StageProgress 内嵌心情联动使用。
+   */
+  function setLiveMood(m: ChatMoodUpdate) {
+    liveMood.value = m
+  }
+
+  /**
+   * M3:写入流式情绪变化帧(SSE `emotion_change`)。
+   */
+  function setLiveEmotion(e: EmotionChange) {
+    liveEmotion.value = e
+  }
+
+  /**
+   * M3:写入流式关系值变化帧(SSE `relation_change`)。
+   */
+  function setLiveRelation(r: RelationChange) {
+    liveRelation.value = r
+  }
+
   function clearSession(sessionId: string) {
     const session = sessions.value.find((s) => s.id === sessionId)
     if (session) {
@@ -350,6 +415,16 @@ export const useChatStore = defineStore('chat', () => {
     currentIntimacy,
     updateMood,
     clearSession,
+    stageState,
+    currentStage,
+    liveMood,
+    liveEmotion,
+    liveRelation,
+    setStageState,
+    resetStageState,
+    setLiveMood,
+    setLiveEmotion,
+    setLiveRelation,
   }
 })
 
