@@ -135,6 +135,45 @@ export interface ChatMoodUpdate {
   valence: number
 }
 
+/**
+ * 流式阶段名（SSE `stage` 事件 v2 协议）。
+ *
+ * 阶段顺序约定:intent → recall_search → tool_dispatch → model_reasoning → answer。
+ * 业务可能跳过某些阶段(例如不需要工具时跳过 tool_dispatch)。
+ */
+export type StageName =
+  | 'intent'
+  | 'recall_search'
+  | 'tool_dispatch'
+  | 'model_reasoning'
+  | 'answer'
+
+/** 阶段状态机:idle/running/done/skipped。 */
+export type StageState = 'idle' | 'running' | 'done' | 'skipped'
+
+/** SSE `stage` 事件:每个阶段 start/end 各 yield 一条。 */
+export interface StageEvent {
+  name: StageName
+  state: 'start' | 'end'
+  ts_ms: number
+}
+
+/** SSE `emotion_change` 事件:情绪标签变化时下发。 */
+export interface EmotionChange {
+  from: string
+  to: string
+  intensity: number
+  reason?: string
+}
+
+/** SSE `relation_change` 事件:关系值变化时下发。 */
+export interface RelationChange {
+  intimacy_delta: number
+  trust_delta: number
+  satisfaction_delta: number
+  source: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -153,6 +192,12 @@ export interface Message {
   thinkings?: ChatThinkingEvent[]
   /** 回忆检索命中详情（event=memory_recall 累积） */
   memoryRecall?: ChatMemoryRecall
+  /**
+   * 阶段状态机（v2 协议）。
+   * 由 SSE `stage` 事件累加得到,用于 StageProgress 组件展示五阶段进展。
+   * key 为 StageName,value 为该阶段的最新 StageState。
+   */
+  stageState?: Record<StageName, StageState>
   /** 消息来源：text = 键盘输入，voice = 语音识别；默认 text */
   source?: 'text' | 'voice'
   createdAt: number
