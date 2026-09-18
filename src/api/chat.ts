@@ -32,6 +32,10 @@ import type {
   ChatResponse,
   ChatThinkingEvent,
   ChatToolCall,
+  EmotionChange,
+  RelationChange,
+  StageEvent,
+  StageName,
 } from '@/types/chat'
 
 /** SSE 帧（解析后的最小单元） */
@@ -291,6 +295,79 @@ function parseMoodUpdate(data: string): import('@/types/chat').ChatMoodUpdate | 
   }
 }
 
+/** stage 帧归一化：{type:'stage', stage:{name,state,ts_ms}} → StageEvent
+ *
+ * 允许任何字符串 state（'start' | 'end'）——业务可能后续扩展。
+ * 缺字段一律返回 null，让调用方静默丢弃该帧。
+ */
+export function parseStageEvent(raw: unknown): StageEvent | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (r.type !== 'stage') return null
+  const stage = r.stage
+  if (!stage || typeof stage !== 'object') return null
+  const s = stage as Record<string, unknown>
+  if (typeof s.name !== 'string' || !s.name) return null
+  if (typeof s.state !== 'string' || !s.state) return null
+  const ts = Number(s.ts_ms)
+  return {
+    name: s.name as StageName,
+    state: s.state as 'start' | 'end',
+    ts_ms: Number.isFinite(ts) ? ts : 0,
+  }
+}
+
+/** emotion_change 帧归一化：{type:'emotion_change', emotion:{from,to,intensity,reason?}}
+ *
+ * `from/to` 必填（缺则视为无效帧），`intensity/reason` 选填。
+ */
+export function parseEmotionChange(raw: unknown): EmotionChange | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (r.type !== 'emotion_change') return null
+  const emotion = r.emotion
+  if (!emotion || typeof emotion !== 'object') return null
+  const e = emotion as Record<string, unknown>
+  if (typeof e.from !== 'string') return null
+  if (typeof e.to !== 'string') return null
+  const intensity = Number(e.intensity)
+  return {
+    from: e.from,
+    to: e.to,
+    intensity: Number.isFinite(intensity) ? intensity : 0,
+    reason: typeof e.reason === 'string' ? e.reason : undefined,
+  }
+}
+
+/** relation_change 帧归一化：{type:'relation_change', relation:{intimacy_delta,trust_delta,satisfaction_delta,source}}
+ *
+ * 三个 delta 都允许缺省（默认 0），`source` 缺省空串。
+ * 只要 relation 对象存在即视为有效帧，让前端能拿到 source 做埋点。
+ */
+export function parseRelationChange(raw: unknown): RelationChange | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (r.type !== 'relation_change') return null
+  const relation = r.relation
+  if (!relation || typeof relation !== 'object') return null
+  const rel = relation as Record<string, unknown>
+  const num = (v: unknown) => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return {
+    intimacy_delta: num(rel.intimacy_delta),
+    trust_delta: num(rel.trust_delta),
+    satisfaction_delta: num(rel.satisfaction_delta),
+    source: typeof rel.source === 'string' ? rel.source : '',
+  }
+}
+
+/** @deprecated 历史事件，前端不再处理。保留解析以兼容旧后端。 */
+export function parsePrefix(raw: unknown): string | null {
+  return null
+}
+
 /** done 帧归一化：{full, sessionId} */
 function parseDonePayload(data: string): { full?: string; sessionId?: string } {
   const obj = safeJsonParse(data)
@@ -324,17 +401,22 @@ export function sendChatMessage(payload: ChatRequest): Promise<ChatResponse> {
  * SSE 流式对话：返回 AbortController，调用方可在需要时中止。
  *
  * options 形态（避免位置参数无限膨胀）：
- *   - onChunk:      每个 delta 增量片段（拼进 assistant 消息）
- *   - onPrefix:     旧级联小模型前缀（与 delta 走同一通道；已停用，保留兼容）
- *   - onPresence:   装饰性即时回应（{text}，方案A：首字到达前的心跳，不进 final_text）
- *   - onContext:    RAG / 检索上下文摘要（persona / L0 / L1 计数）
- *   - onTool:       工具调用结果（单条）
- *   - onResource:   附件资源（单条，按 file_id+chunk_index 去重由调用方负责）
- *   - onMemory:     长期记忆抽取结果（成功 / 失败 + error）
- *   - onThinking:   思考过程事件（{stage, text}，可多次）
- *   - onRecall:     回忆检索命中详情（{count, hits}）
- *   - onDone:       收到 done 帧；payload = {full?, sessionId?}
- *   - onError:      解析 / 网络错误（已忽略 AbortError）
+ *   - onChunk:         每个 delta 增量片段（拼进 assistant 消息）
+ *   - onPrefix:        旧级联小模型前缀（与 delta 走同一通道；已停用，保留兼容）
+ *   - onPresence:      装饰性即时回应（{text}，方案A：首字到达前的心跳，不进 final_text）
+ *   - onContext:       RAG / 检索上下文摘要（persona / L0 / L1 计数）
+ *   - onTool:          工具调用结果（单条）
+ *   - onResource:      附件资源（单条，按 file_id+chunk_index 去重由调用方负责）
+ *   - onMemory:        长期记忆抽取结果（成功 / 失败 + error）
+ *   - onThinking:      思考过程事件（{stage, text}，可多次）
+ *   - onRecall:        回忆检索命中详情（{count, hits}）
+ *   - onStageStart:    v2 协议：阶段开始（intent/recall_search/tool_dispatch/model_reasoning/answer）
+ *   - onStageEnd:      v2 协议：阶段结束
+ *   - onEmotionChange: v2 协议：情绪标签变化
+ *   - onRelationChange:v2 协议：关系值变化（intimacy/trust/satisfaction）
+ *   - onMoodUpdate:    M2:三桶心情实时更新
+ *   - onDone:          收到 done 帧；payload = {full?, sessionId?}
+ *   - onError:         解析 / 网络错误（已忽略 AbortError）
  *
  * 任一 callback 缺省（undefined）都不会被调用，不抛错。
  */
@@ -348,6 +430,10 @@ export interface SendChatStreamOptions {
   onMemory?: (info: ChatMemoryResult) => void
   onThinking?: (event: ChatThinkingEvent) => void
   onRecall?: (info: ChatMemoryRecall) => void
+  onStageStart?: (name: StageName) => void
+  onStageEnd?: (name: StageName) => void
+  onEmotionChange?: (event: EmotionChange) => void
+  onRelationChange?: (event: RelationChange) => void
   onMoodUpdate?: (event: import('@/types/chat').ChatMoodUpdate) => void
   onDone?: (payload: { full?: string; sessionId?: string }) => void
   onError?: (error: Error) => void
@@ -610,6 +696,50 @@ function handleFrame(
           m.expression,
         )
         h.onMoodUpdate?.(m)
+      }
+      return
+    }
+    case 'stage': {
+      // v2 协议：五阶段状态机（intent/recall_search/tool_dispatch/model_reasoning/answer）
+      const ev = parseStageEvent(obj)
+      if (ev) {
+        if (ev.state === 'start') {
+          console.info('[sse] ← stage start, name=%s, ts=%d', ev.name, ev.ts_ms)
+          h.onStageStart?.(ev.name)
+        } else {
+          console.info('[sse] ← stage end, name=%s, ts=%d', ev.name, ev.ts_ms)
+          h.onStageEnd?.(ev.name)
+        }
+      }
+      return
+    }
+    case 'emotion_change': {
+      // v2 协议：情绪标签变化
+      const ev = parseEmotionChange(obj)
+      if (ev) {
+        console.info(
+          '[sse] ← emotion_change, %s→%s, intensity=%.2f, reason=%s',
+          ev.from,
+          ev.to,
+          ev.intensity,
+          ev.reason ?? '',
+        )
+        h.onEmotionChange?.(ev)
+      }
+      return
+    }
+    case 'relation_change': {
+      // v2 协议：关系值变化
+      const ev = parseRelationChange(obj)
+      if (ev) {
+        console.info(
+          '[sse] ← relation_change, intimacy=%+.3f, trust=%+.3f, satisfaction=%+.3f, source=%s',
+          ev.intimacy_delta,
+          ev.trust_delta,
+          ev.satisfaction_delta,
+          ev.source,
+        )
+        h.onRelationChange?.(ev)
       }
       return
     }
