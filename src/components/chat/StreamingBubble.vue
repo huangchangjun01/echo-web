@@ -35,12 +35,21 @@ const hasAnyPanel = computed(() =>
   || (props.message.toolCalls?.length ?? 0) > 0
   || (props.message.attachments?.length ?? 0) > 0,
 )
+
+/**
+ * 任意阶段被触发过(running / done / skipped)即为 true。
+ * 用于让 StageProgress 在流式结束后仍能保留阶段历史,
+ * 而不是仅靠 isStreaming || hasAnyPanel 兜底（后两个都为空时会消失）。
+ */
+const hasAnyStageActivity = computed(() =>
+  Object.values(props.message.stageState ?? {}).some(s => s !== 'idle'),
+)
 </script>
 
 <template>
   <div class="streaming-bubble">
     <StageProgress
-      v-if="isStreaming || hasAnyPanel"
+      v-if="hasAnyStageActivity"
       :stage-state="message.stageState ?? DEFAULT_STAGE_STATE"
     />
     <ChatMarkdown :source="message.content" />
