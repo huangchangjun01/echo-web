@@ -1,0 +1,45 @@
+/**
+ * 三个折叠子面板（Thought / ToolCalls / Resources）的共享样式。
+ *
+ * 设计要点：
+ *   - B 风格暖色面板（粉橙系背景 + 圆角），与 StageProgress 视觉协调
+ *   - 使用原生 <details>/<summary> 实现折叠，避免引入额外状态
+ *   - summary::marker 隐藏；body 用 padding 模拟内边距
+ */
+.chat-subpanel {
+  margin-top: 8px;
+  background: rgba(255, 200, 180, 0.12);
+  border-radius: 10px;
+  font-size: 12px;
+  color: #a05a3a;
+  overflow: hidden;
+}
+.chat-subpanel summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.chat-subpanel summary::marker,
+.chat-subpanel summary::-webkit-details-marker {
+  display: none;
+}
+.chat-subpanel summary:hover {
+  background: rgba(255, 200, 180, 0.18);
+}
+.chat-subpanel .subpanel-meta {
+  color: #d4a78a;
+  font-size: 11px;
+}
+.chat-subpanel .subpanel-body {
+  padding: 0 14px 12px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.chat-subpanel .subpanel-icon {
+  font-size: 14px;
+  line-height: 1;
+}
