@@ -35,22 +35,36 @@ function iconFor(state: StageState): string {
 <style scoped>
 .stage-progress {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-wrap: nowrap;
+  gap: 6px;
   margin-bottom: 12px;
+  width: 100%;
 }
 .stage-chip {
-  flex: 1 1 calc(33.333% - 4px);
+  flex: 1 1 0;
   min-width: 0;
   font-size: 11px;
-  padding: 5px 8px;
-  border-radius: 8px;
+  padding: 6px 8px;
+  border-radius: 999px;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: background-color .3s, color .3s, box-shadow .3s;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
+}
+.stage-icon {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+.stage-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .stage-chip.stage-idle { background: rgba(255, 138, 102, 0.15); color: #a05a3a; }
 .stage-chip.stage-running {
