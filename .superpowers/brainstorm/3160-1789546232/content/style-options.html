@@ -1,0 +1,100 @@
+<h2>选择你喜欢的视觉风格</h2>
+<p class="subtitle">同样的「结构化阶段进度条 + 折叠面板」，不同氛围。从对比中挑一个最贴近你想要的方向。</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="minimal" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#f7f7f8;padding:16px;border-radius:8px;font-family:'Inter','PingFang SC',sans-serif;">
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <div style="flex:1;background:#e5e7eb;color:#9ca3af;font-size:10px;padding:6px 8px;border-radius:4px;text-align:center;">意图</div>
+        <div style="flex:1;background:#d1d5db;color:#374151;font-size:10px;padding:6px 8px;border-radius:4px;text-align:center;">回忆</div>
+        <div style="flex:1;background:#111827;color:#fff;font-size:10px;padding:6px 8px;border-radius:4px;text-align:center;">● 推理</div>
+        <div style="flex:1;background:#e5e7eb;color:#9ca3af;font-size:10px;padding:6px 8px;border-radius:4px;text-align:center;">回答</div>
+      </div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px;font-size:12px;color:#1f2937;">
+        <div style="color:#6b7280;font-size:10px;margin-bottom:4px;">▍ 思考中</div>
+        <div style="font-style:italic;color:#6b7280;font-size:11px;margin-bottom:8px;">用户想周末出门，应该先问位置偏好…</div>
+        <div>好呀！想问一下你想去 <strong>市区</strong> 还是 <strong>郊区</strong> 的樱花园？</div>
+      </div>
+      <div style="margin-top:8px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:11px;color:#6b7280;">
+        ▸ 调用了 1 个工具 · 引用了 2 个资源
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · 极简现代</h3>
+      <p>白底 + 灰阶 + 极轻阴影。类似 ChatGPT / Claude Web。专业、克制、易扫描。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="warm" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:linear-gradient(135deg,#fff5f7 0%,#fff0e6 100%);padding:16px;border-radius:8px;font-family:'Inter','PingFang SC',sans-serif;">
+      <div style="display:flex;gap:4px;margin-bottom:10px;">
+        <div style="flex:1;background:rgba(255,200,180,.4);color:#a05a3a;font-size:10px;padding:6px;border-radius:999px;text-align:center;">🌸 意图</div>
+        <div style="flex:1;background:rgba(255,200,180,.4);color:#a05a3a;font-size:10px;padding:6px;border-radius:999px;text-align:center;">🌸 回忆</div>
+        <div style="flex:1;background:#ff8a65;color:#fff;font-size:10px;padding:6px;border-radius:999px;text-align:center;box-shadow:0 0 0 4px rgba(255,138,102,.25);">● 推理</div>
+        <div style="flex:1;background:rgba(255,255,255,.5);color:#d4a78a;font-size:10px;padding:6px;border-radius:999px;text-align:center;">🌸 回答</div>
+      </div>
+      <div style="background:rgba(255,255,255,.85);border-radius:14px;padding:14px;font-size:12px;color:#5a3a2a;backdrop-filter:blur(8px);">
+        <div style="color:#ff8a65;font-size:10px;margin-bottom:4px;">💭 正在想……</div>
+        <div style="font-style:italic;color:#a06a4a;font-size:11px;margin-bottom:8px;">ta 想周末出门呢，先问想看市区还是郊区～</div>
+        <div>好呀～ 想去看 <strong>市区</strong> 还是 <strong>郊区</strong> 的樱花呀？</div>
+      </div>
+      <div style="margin-top:8px;background:rgba(255,255,255,.7);border-radius:10px;padding:8px;font-size:11px;color:#a06a4a;">
+        🌸 调用了 1 个工具 · 引用了 2 个资源
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · 温暖陪伴</h3>
+      <p>粉橙渐变 + 圆润胶囊 + emoji。当前是情感陪伴 App，推荐方向。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="glass" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:linear-gradient(135deg,#a78bfa 0%,#f472b6 100%);padding:16px;border-radius:8px;font-family:'Inter','PingFang SC',sans-serif;">
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <div style="flex:1;background:rgba(255,255,255,.2);color:rgba(255,255,255,.6);font-size:10px;padding:6px;border-radius:6px;text-align:center;backdrop-filter:blur(4px);">意图</div>
+        <div style="flex:1;background:rgba(255,255,255,.2);color:rgba(255,255,255,.6);font-size:10px;padding:6px;border-radius:6px;text-align:center;backdrop-filter:blur(4px);">回忆</div>
+        <div style="flex:1;background:rgba(255,255,255,.95);color:#7c3aed;font-size:10px;padding:6px;border-radius:6px;text-align:center;font-weight:600;">● 推理</div>
+        <div style="flex:1;background:rgba(255,255,255,.2);color:rgba(255,255,255,.6);font-size:10px;padding:6px;border-radius:6px;text-align:center;backdrop-filter:blur(4px);">回答</div>
+      </div>
+      <div style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);border-radius:16px;padding:14px;font-size:12px;color:#fff;backdrop-filter:blur(12px);">
+        <div style="color:rgba(255,255,255,.7);font-size:10px;margin-bottom:4px;">思考中……</div>
+        <div style="font-style:italic;color:rgba(255,255,255,.75);font-size:11px;margin-bottom:8px;">用户想周末看樱花，先了解偏好</div>
+        <div>好呀！你想看 <strong>市区</strong> 还是 <strong>郊外</strong> 的樱花？</div>
+      </div>
+      <div style="margin-top:8px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.25);border-radius:10px;padding:8px;font-size:11px;color:rgba(255,255,255,.85);backdrop-filter:blur(8px);">
+        ▸ 1 个工具 · 2 个资源
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C · 玻璃拟态</h3>
+      <p>渐变背景 + 毛玻璃面板 + 半透明。现代感强，但和"情感陪伴"主题略冲突。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="cyber" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0a0a0f;padding:16px;border-radius:8px;font-family:'JetBrains Mono','SF Mono',monospace;">
+      <div style="display:flex;gap:4px;margin-bottom:10px;">
+        <div style="flex:1;border:1px solid #1f2937;color:#4b5563;font-size:10px;padding:6px;text-align:center;">[01] INTENT</div>
+        <div style="flex:1;border:1px solid #1f2937;color:#4b5563;font-size:10px;padding:6px;text-align:center;">[02] RECALL</div>
+        <div style="flex:1;border:1px solid #22d3ee;color:#22d3ee;font-size:10px;padding:6px;text-align:center;box-shadow:0 0 8px #22d3ee;">►[03] THINK</div>
+        <div style="flex:1;border:1px solid #1f2937;color:#4b5563;font-size:10px;padding:6px;text-align:center;">[04] ANSWER</div>
+      </div>
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:12px;font-size:12px;color:#e2e8f0;">
+        <div style="color:#22d3ee;font-size:10px;margin-bottom:4px;">// reasoning</div>
+        <div style="color:#94a3b8;font-size:11px;margin-bottom:8px;">→ 周末出行意图, 询问地点偏好</div>
+        <div style="color:#e2e8f0;">好呀。你想看 <span style="color:#22d3ee">市区</span> 还是 <span style="color:#22d3ee">郊区</span>？</div>
+      </div>
+      <div style="margin-top:8px;background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:8px;font-size:11px;color:#64748b;">
+        [tool×1] [resource×2]
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>D · 暗色赛博</h3>
+      <p>深色 + 终端字体 + 霓虹强调。技术感强，但偏离陪伴氛围。</p>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:24px;">提示：可同时选多个作为元素混搭（比如结构用 A、图标用 B、强调色用 C），或在终端告诉我"其他"。</p>

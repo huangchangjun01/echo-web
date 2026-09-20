@@ -160,25 +160,30 @@ export function resolveUrl(url: string): string {
  * 帧归一化：把 {type, ...} 的 data 解析成强类型对象
  * ====================================================================== */
 
-/** context 帧归一化：{persona_len, l0_count, l1_count} + 方案 A 扩展 {persona, l0_items, l1_items} */
+/** context 帧归一化：{persona_len, l0_count, l1_count, l2_count} + 方案 A 扩展 {persona, l0_items, l1_items, l2_items} */
 function parseContextInfo(data: string): ChatContextInfo | null {
   const obj = safeJsonParse(data)
   if (!obj) return null
   const personaLen = typeof obj.persona_len === 'number' ? obj.persona_len : undefined
   const l0Count = typeof obj.l0_count === 'number' ? obj.l0_count : undefined
   const l1Count = typeof obj.l1_count === 'number' ? obj.l1_count : undefined
+  const l2Count = typeof obj.l2_count === 'number' ? obj.l2_count : undefined
   // 三个字段都没有 → 视为无效帧
   if (personaLen === undefined && l0Count === undefined && l1Count === undefined) return null
   return {
     personaLen: personaLen ?? 0,
     l0Count: l0Count ?? 0,
     l1Count: l1Count ?? 0,
+    l2Count: l2Count ?? 0,
     persona: typeof obj.persona === 'string' ? obj.persona : undefined,
     l0Items: Array.isArray(obj.l0_items)
       ? (obj.l0_items.filter((x: unknown) => typeof x === 'string') as string[])
       : undefined,
     l1Items: Array.isArray(obj.l1_items)
       ? (obj.l1_items.filter((x: unknown) => typeof x === 'string') as string[])
+      : undefined,
+    l2Items: Array.isArray(obj.l2_items)
+      ? (obj.l2_items.filter((x: unknown) => typeof x === 'string') as string[])
       : undefined,
   }
 }

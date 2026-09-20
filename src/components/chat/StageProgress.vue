@@ -12,6 +12,8 @@
  *       answer         → message.content 预览
  *   - 点击 popover 外部或再次点击同一胶囊 → 关闭
  *   - 点击其他胶囊 → 切换到那个胶囊的 popover
+ *   - 子项名称行 position: sticky：内容较长向下滚动时，当前子项名称始终钉在
+ *     popover 顶部一行，便于随时点击折叠
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
 import type { ChatThinkingEvent, StageName, StageState } from '@/types/chat'
@@ -64,6 +66,33 @@ function onDocClick(e: MouseEvent) {
 
 document.addEventListener('click', onDocClick)
 onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+
+// ---------- popover 子项折叠状态 ----------
+// 子项（思考 / 人格 / L0 核心记忆 / L1 近期摘要 / 召回命中 / …）名称可点击折叠/展开，
+// 折叠状态按「胶囊阶段 + 子项序号」隔离：切换胶囊互不串扰，默认全部展开（保持原展示行为）。
+const collapsedSections = ref<Set<string>>(new Set())
+
+function sectionKey(idx: number): string | null {
+  const stage = openStage.value
+  return stage ? `${stage}#${idx}` : null
+}
+
+function toggleSection(idx: number) {
+  const key = sectionKey(idx)
+  if (!key) return
+  const next = new Set(collapsedSections.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  collapsedSections.value = next
+}
+
+function isSectionCollapsed(idx: number): boolean {
+  const key = sectionKey(idx)
+  return key ? collapsedSections.value.has(key) : false
+}
 
 // ---------- popover 内容 ----------
 /** 按阶段筛选 thinking（model_reasoning 包含 cascade） */
@@ -127,14 +156,28 @@ const popoverEntries = computed<PopoverBlock[]>(() => {
         text: ctx.l0Items?.length ? undefined : '（本轮未注入 L0 详情，仅计数）',
         items: ctx.l0Items && ctx.l0Items.length ? ctx.l0Items : undefined,
       })
+      // L1 / L2 拆分：优先用后端结构化 l2_items；老后端只下发混合 l1_items 时按 [L2] 前缀拆分
+      const hasL2Field = Array.isArray(ctx.l2Items)
+      const rawL1Items = ctx.l1Items ?? []
+      const l2Items = hasL2Field ? ctx.l2Items : rawL1Items.filter((i) => i.startsWith('[L2]'))
+      const l1Items = hasL2Field ? rawL1Items : rawL1Items.filter((i) => !i.startsWith('[L2]'))
       // L1 块
       out.push({
         label: 'L1 近期摘要',
-        meta: `${ctx.l1Count} 条`,
-        kind: ctx.l1Items?.length ? 'list' : 'text',
-        text: ctx.l1Items?.length ? undefined : '（本轮未注入 L1 详情，仅计数）',
-        items: ctx.l1Items && ctx.l1Items.length ? ctx.l1Items : undefined,
+        meta: `${l1Items.length || ctx.l1Count} 条`,
+        kind: l1Items.length ? 'list' : 'text',
+        text: l1Items.length ? undefined : '（本轮未注入 L1 详情，仅计数）',
+        items: l1Items.length ? l1Items : undefined,
       })
+      // L2 块（有内容才展示）
+      if (l2Items.length) {
+        out.push({
+          label: 'L2 会话摘要',
+          meta: `${l2Items.length} 条`,
+          kind: 'list',
+          items: l2Items,
+        })
+      }
     } else {
       out.push({ label: '上下文', kind: 'text', text: '（无 context 数据）' })
     }
@@ -229,14 +272,23 @@ const popoverEntries = computed<PopoverBlock[]>(() => {
       <div class="stage-popover-inner">
         <div v-if="popoverEntries.length === 0" class="popover-empty">该阶段无数据</div>
         <div v-for="(entry, idx) in popoverEntries" :key="idx" class="popover-section">
-          <div class="popover-section-head">
+          <button
+            type="button"
+            class="popover-section-head"
+            :class="{ 'popover-section-head--collapsed': isSectionCollapsed(idx) }"
+            :aria-expanded="!isSectionCollapsed(idx)"
+            @click="toggleSection(idx)"
+          >
+            <span class="popover-section-caret" aria-hidden="true">{{ isSectionCollapsed(idx) ? '▸' : '▾' }}</span>
             <span class="popover-section-label">{{ entry.label }}</span>
             <span v-if="entry.meta" class="popover-section-meta">{{ entry.meta }}</span>
-          </div>
-          <pre v-if="entry.kind === 'text'" class="popover-section-text">{{ entry.text }}</pre>
-          <ol v-else class="popover-section-list">
-            <li v-for="(item, i) in entry.items" :key="i" class="popover-section-item">{{ item }}</li>
-          </ol>
+          </button>
+          <template v-if="!isSectionCollapsed(idx)">
+            <pre v-if="entry.kind === 'text'" class="popover-section-text">{{ entry.text }}</pre>
+            <ol v-else class="popover-section-list">
+              <li v-for="(item, i) in entry.items" :key="i" class="popover-section-item">{{ item }}</li>
+            </ol>
+          </template>
         </div>
       </div>
     </div>
@@ -338,12 +390,43 @@ const popoverEntries = computed<PopoverBlock[]>(() => {
   font-style: italic;
 }
 .popover-section-head {
+  /* sticky：内容较长时当前子项名称始终钉在 popover 顶部一行，方便点击折叠 */
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
+  width: 100%;
   margin-bottom: 6px;
-  padding-bottom: 4px;
+  padding: 2px 4px 4px;
+  border: none;
   border-bottom: 1px dashed rgba(255, 138, 102, 0.25);
+  border-radius: 4px;
+  /* 与 popover 同底色，滚动时遮住下方内容，避免透过 */
+  background: rgba(255, 255, 255, 0.98);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  transition: background-color .15s;
+}
+.popover-section-head:hover {
+  background: rgba(255, 138, 102, 0.08);
+}
+.popover-section-head:focus-visible {
+  outline: 2px solid rgba(255, 138, 102, 0.5);
+  outline-offset: 1px;
+}
+.popover-section-caret {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  color: #ff8a65;
+  transition: transform .15s;
+}
+.popover-section-head--collapsed .popover-section-caret {
+  transform: rotate(-90deg);
 }
 .popover-section-label {
   font-size: 11px;

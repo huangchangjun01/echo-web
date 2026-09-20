@@ -1,0 +1,152 @@
+<h2>完整消息样式预览</h2>
+<p class="subtitle">B 风格 · 5 阶段进度条 · 气泡折叠子区。下面展示「流式中」与「已完成」两个状态。</p>
+
+<div class="split">
+
+<div class="mockup">
+<div class="mockup-header">状态 A · 流式中（正在推理阶段）</div>
+<div class="mockup-body" style="background:linear-gradient(135deg,#fff5f7 0%,#fff0e6 100%);padding:20px;font-family:'Inter','PingFang SC',sans-serif;">
+
+<!-- 阶段进度条 -->
+<div style="display:flex;gap:4px;margin-bottom:14px;">
+  <div style="flex:1;background:rgba(255,200,180,.4);color:#a05a3a;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;position:relative;">
+    🌸 意图
+    <span style="position:absolute;top:-3px;right:-3px;width:14px;height:14px;background:#4ade80;border-radius:50%;border:2px solid #fff5f7;font-size:0;">✓</span>
+  </div>
+  <div style="flex:1;background:rgba(255,200,180,.4);color:#a05a3a;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;position:relative;">
+    🌸 回忆
+    <span style="position:absolute;top:-3px;right:-3px;width:14px;height:14px;background:#4ade80;border-radius:50%;border:2px solid #fff5f7;font-size:0;">✓</span>
+  </div>
+  <div style="flex:1;background:rgba(255,255,255,.5);color:#d4a78a;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;">🌸 工具</div>
+  <div style="flex:1;background:#ff8a65;color:#fff;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;font-weight:600;box-shadow:0 0 0 4px rgba(255,138,102,.25);">● 推理</div>
+  <div style="flex:1;background:rgba(255,255,255,.5);color:#d4a78a;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;">🌸 回答</div>
+</div>
+
+<!-- 主体气泡 -->
+<div style="background:rgba(255,255,255,.92);border-radius:18px 18px 18px 6px;padding:16px 18px;color:#5a3a2a;font-size:14px;line-height:1.6;backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(255,138,102,.08);">
+
+  <!-- 思考中状态行 -->
+  <div style="color:#ff8a65;font-size:11px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+    <span style="display:inline-block;width:6px;height:6px;background:#ff8a65;border-radius:50%;animation:pulse 1.4s infinite;"></span>
+    正在想……
+  </div>
+
+  <!-- 主答案（已开始流出） -->
+  <div>好呀！你想去看 <strong style="color:#ff8a65;">市区</strong> 还是 <strong style="color:#ff8a65;">郊外</strong> 的樱花呀？<span style="display:inline-block;width:7px;height:14px;background:#ff8a65;animation:blink 1s infinite;vertical-align:middle;"></span></div>
+
+  <!-- 折叠子区 · 思考 -->
+  <details style="margin-top:14px;background:rgba(255,200,180,.12);border-radius:10px;padding:0;">
+    <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:#a05a3a;list-style:none;">
+      💭 思考过程 <span style="color:#d4a78a;">· 3 秒</span>
+    </summary>
+    <div style="padding:0 14px 12px;font-size:12px;color:#a06a4a;font-style:italic;line-height:1.6;">
+      用户想周末出门看樱花，应该先了解地点偏好…<br>
+      结合 ta 之前提过的「不喜欢人多」，倾向推荐郊区……
+    </div>
+  </details>
+
+  <!-- 折叠子区 · 工具调用 -->
+  <details style="margin-top:8px;background:rgba(255,200,180,.12);border-radius:10px;padding:0;">
+    <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:#a05a3a;list-style:none;">
+      🛠️ 调用工具 · 2 次
+    </summary>
+    <div style="padding:0 14px 12px;font-size:11px;color:#a06a4a;">
+      <div style="margin-bottom:6px;">✓ <strong>analyze_emotion</strong> · joy (0.62)</div>
+      <div>✓ <strong>recall_memory</strong> · 命中 2 条</div>
+    </div>
+  </details>
+
+  <!-- 折叠子区 · 资源 -->
+  <details style="margin-top:8px;background:rgba(255,200,180,.12);border-radius:10px;padding:0;">
+    <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:#a05a3a;list-style:none;">
+      📎 引用资源 · 2 个
+    </summary>
+    <div style="padding:0 14px 12px;font-size:11px;color:#a06a4a;">
+      <div style="margin-bottom:4px;">📷 樱花图_01.jpg · 相似度 0.91</div>
+      <div>📄 上周聊天摘要.md · 相似度 0.78</div>
+    </div>
+  </details>
+
+</div>
+
+<div style="margin-top:6px;font-size:11px;color:#d4a78a;text-align:right;">思考中 ▍</div>
+
+</div>
+</div>
+
+<div class="mockup">
+<div class="mockup-header">状态 B · 已完成（所有阶段 ✓）</div>
+<div class="mockup-body" style="background:linear-gradient(135deg,#fff5f7 0%,#fff0e6 100%);padding:20px;font-family:'Inter','PingFang SC',sans-serif;">
+
+<!-- 阶段进度条 · 完成态 -->
+<div style="display:flex;gap:4px;margin-bottom:14px;">
+  <div style="flex:1;background:#4ade80;color:#fff;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;position:relative;">✓ 意图</div>
+  <div style="flex:1;background:#4ade80;color:#fff;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;">✓ 回忆</div>
+  <div style="flex:1;background:#4ade80;color:#fff;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;">✓ 工具</div>
+  <div style="flex:1;background:#4ade80;color:#fff;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;">✓ 推理</div>
+  <div style="flex:1;background:#4ade80;color:#fff;font-size:11px;padding:7px 4px;border-radius:999px;text-align:center;">✓ 回答</div>
+</div>
+
+<!-- 主体气泡 -->
+<div style="background:rgba(255,255,255,.92);border-radius:18px 18px 18px 6px;padding:16px 18px;color:#5a3a2a;font-size:14px;line-height:1.6;backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(255,138,102,.08);">
+
+  <div style="margin-bottom:14px;">好呀！我记得你之前说 <strong style="color:#ff8a65;">不太喜欢人多的地方</strong>，那我们就去 <strong style="color:#ff8a65;">郊外</strong> 的樱花园吧？</div>
+
+  <div style="margin-bottom:14px;">我帮你找到几个不错的地点：</div>
+
+  <ul style="margin:0 0 14px 18px;color:#5a3a2a;">
+    <li>🌸 <strong>青龙湖樱花谷</strong> · 距离 18km · 人少</li>
+    <li>🌸 <strong>凤凰岭</strong> · 距离 24km · 有山景</li>
+  </ul>
+
+  <div style="margin-bottom:14px;">选好后我可以帮你看 <code style="background:rgba(255,200,180,.3);padding:1px 5px;border-radius:4px;font-size:12px;">天气</code> 和 <code style="background:rgba(255,200,180,.3);padding:1px 5px;border-radius:4px;font-size:12px;">路线</code>～</div>
+
+  <!-- 完成态默认展开一个最相关的折叠 -->
+  <details open style="margin-top:14px;background:rgba(255,200,180,.12);border-radius:10px;padding:0;">
+    <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:#a05a3a;list-style:none;">
+      💭 思考过程 <span style="color:#d4a78a;">· 4.2 秒 · 245 字</span>
+    </summary>
+    <div style="padding:0 14px 12px;font-size:12px;color:#a06a4a;font-style:italic;line-height:1.6;">
+      用户意图是周末出门看樱花。<br>
+      检索到 L1 摘要显示用户偏好「人少」和「自然环境」。<br>
+      调用 analyze_emotion 识别到当前情绪是愉悦。<br>
+      综合判断推荐郊外人少的樱花园……
+    </div>
+  </details>
+
+  <details style="margin-top:8px;background:rgba(255,200,180,.12);border-radius:10px;padding:0;">
+    <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:#a05a3a;list-style:none;">
+      🛠️ 调用工具 · 2 次
+    </summary>
+    <div style="padding:0 14px 12px;font-size:11px;color:#a06a4a;">
+      <div style="margin-bottom:6px;">✓ <strong>analyze_emotion</strong> · joy (0.62)</div>
+      <div>✓ <strong>recall_memory</strong> · 命中 2 条</div>
+    </div>
+  </details>
+
+  <details style="margin-top:8px;background:rgba(255,200,180,.12);border-radius:10px;padding:0;">
+    <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:#a05a3a;list-style:none;">
+      📎 引用资源 · 2 个
+    </summary>
+    <div style="padding:0 14px 12px;font-size:11px;color:#a06a4a;">
+      <div style="margin-bottom:4px;">📷 樱花图_01.jpg · 相似度 0.91</div>
+      <div>📄 上周聊天摘要.md · 相似度 0.78</div>
+    </div>
+  </details>
+
+</div>
+
+<div style="margin-top:6px;font-size:11px;color:#d4a78a;text-align:right;display:flex;justify-content:flex-end;gap:8px;">
+  <span>📋 复制</span> · <span>🔊 朗读</span> · <span>👍</span>
+</div>
+
+</div>
+</div>
+
+</div>
+
+<p class="subtitle" style="margin-top:20px;">细节调整建议（如果哪里不对请直接指出）：
+<br>① 阶段条是胶囊式还是分段式？
+<br>② 完成态默认折叠所有面板，还是默认展开「思考过程」？
+<br>③ 工具 / 资源面板是否需要图标颜色区分？
+<br>④ 主答案是否需要「复制 / 朗读 / 反馈」操作行？</p>

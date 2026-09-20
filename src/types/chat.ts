@@ -42,22 +42,28 @@ export interface ChatAttachment {
 /** RAG / 检索上下文摘要（event=context）。
  *
  * 协议字段：
- *   - persona_len / l0_count / l1_count：计数（兼容老协议）
- *   - persona / l0_items / l1_items：真实注入内容（方案 A 扩展）
+ *   - persona_len / l0_count / l1_count / l2_count：计数（l2_count 为扩展）
+ *   - persona / l0_items / l1_items / l2_items：真实注入内容（方案 A 扩展）
  *
- * 实际内容只下发有限条数（persona 全部 / L0 最多 20 / L1 最多 10），
+ * 实际内容只下发有限条数（persona 全部 / L0 最多 50 / L1 最多 100 / L2 最多 100），
  * 超出部分仅以计数展示，避免 SSE 帧过大。
+ * l1_items / l2_items 由后端按 [L1]/[L2] 前缀拆分下发；老后端只下发混合 l1_items 时，
+ * 前端按 [L2] 前缀拆分兜底。
  */
 export interface ChatContextInfo {
   personaLen: number
   l0Count: number
   l1Count: number
+  /** L2 会话摘要条数（父摘要） */
+  l2Count?: number
   /** 人格原文（DEFAULT_PERSONA 或用户自定义人格），完整下发 */
   persona?: string
-  /** L0 核心记忆条目（最多 20 条） */
+  /** L0 核心记忆条目（最多 50 条） */
   l0Items?: string[]
-  /** L1 近期摘要条目（最多 10 条） */
+  /** L1 近期摘要条目（最多 100 条，仅 L1 子条目） */
   l1Items?: string[]
+  /** L2 会话摘要条目（父摘要，最多 100 条） */
+  l2Items?: string[]
 }
 
 /** 工具调用结果（event=tool）。

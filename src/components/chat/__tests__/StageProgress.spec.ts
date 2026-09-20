@@ -37,4 +37,109 @@ describe('StageProgress', () => {
     })
     expect(wrapper.findAll('.stage-done')).toHaveLength(2)
   })
+
+  it('collapses and expands a section when clicking its name', async () => {
+    const wrapper = mount(StageProgress, {
+      props: {
+        stageState: { ...idleState, intent: 'done' },
+        context: { personaLen: 10, l0Count: 0, l1Count: 0, persona: '测试人格内容' },
+      },
+    })
+    // 打开「意图」胶囊：思考 + 人格 + L0 + L1 共 4 个子项
+    await wrapper.findAll('.stage-chip')[0].trigger('click')
+    expect(wrapper.findAll('.popover-section-text')).toHaveLength(4)
+
+    // 点击「人格」名称 → 折叠
+    const heads = wrapper.findAll('.popover-section-head')
+    expect(heads).toHaveLength(4)
+    expect(heads[1].find('.popover-section-label').text()).toBe('人格')
+    await heads[1].trigger('click')
+    expect(wrapper.findAll('.popover-section-text')).toHaveLength(3)
+    expect(heads[1].classes()).toContain('popover-section-head--collapsed')
+    expect(heads[1].attributes('aria-expanded')).toBe('false')
+
+    // 再次点击 → 展开
+    await heads[1].trigger('click')
+    expect(wrapper.findAll('.popover-section-text')).toHaveLength(4)
+    expect(heads[1].classes()).not.toContain('popover-section-head--collapsed')
+    expect(heads[1].attributes('aria-expanded')).toBe('true')
+  })
+
+  it('keeps collapse state isolated across capsules', async () => {
+    const wrapper = mount(StageProgress, {
+      props: {
+        stageState: { ...idleState, intent: 'done', recall_search: 'done' },
+        context: { personaLen: 10, l0Count: 0, l1Count: 0, persona: '测试人格内容' },
+        memoryRecall: { count: 0, hits: [] },
+      },
+    })
+    // 意图胶囊内折叠「人格」（序号 1）
+    await wrapper.findAll('.stage-chip')[0].trigger('click')
+    const intentHeads = wrapper.findAll('.popover-section-head')
+    await intentHeads[1].trigger('click')
+    expect(wrapper.findAll('.popover-section-text')).toHaveLength(3)
+
+    // 切换到「回忆」胶囊：默认全部展开（思考 + 召回命中）
+    await wrapper.findAll('.stage-chip')[1].trigger('click')
+    expect(wrapper.findAll('.popover-section-head')).toHaveLength(2)
+    expect(wrapper.findAll('.popover-section-text')).toHaveLength(2)
+
+    // 切回「意图」胶囊：「人格」仍保持折叠
+    await wrapper.findAll('.stage-chip')[0].trigger('click')
+    expect(wrapper.findAll('.popover-section-text')).toHaveLength(3)
+  })
+
+  it('renders a dedicated L2 block split from mixed l1_items (legacy backend)', async () => {
+    const wrapper = mount(StageProgress, {
+      props: {
+        stageState: { ...idleState, intent: 'done' },
+        context: {
+          personaLen: 5,
+          l0Count: 0,
+          l1Count: 3,
+          persona: '测试人格',
+          l1Items: ['[L2] 父摘要A', '[L1] 子条目B', '[L1] 子条目C'],
+        },
+      },
+    })
+    await wrapper.findAll('.stage-chip')[0].trigger('click')
+    const labels = wrapper.findAll('.popover-section-label').map((s) => s.text())
+    expect(labels).toContain('L1 近期摘要')
+    expect(labels).toContain('L2 会话摘要')
+    const sectionByLabel = (label: string) =>
+      wrapper.findAll('.popover-section').find(
+        (s) => s.find('.popover-section-label').text() === label,
+      )!
+    expect(sectionByLabel('L2 会话摘要').findAll('.popover-section-item').map((i) => i.text()))
+      .toEqual(['[L2] 父摘要A'])
+    expect(sectionByLabel('L1 近期摘要').findAll('.popover-section-item').map((i) => i.text()))
+      .toEqual(['[L1] 子条目B', '[L1] 子条目C'])
+  })
+
+  it('uses structured l2_items when provided', async () => {
+    const wrapper = mount(StageProgress, {
+      props: {
+        stageState: { ...idleState, intent: 'done' },
+        context: {
+          personaLen: 5,
+          l0Count: 0,
+          l1Count: 1,
+          l2Count: 2,
+          persona: '测试人格',
+          l1Items: ['[L1] 子条目A'],
+          l2Items: ['[L2] 父摘要X', '[L2] 父摘要Y'],
+        },
+      },
+    })
+    await wrapper.findAll('.stage-chip')[0].trigger('click')
+    const sectionByLabel = (label: string) =>
+      wrapper.findAll('.popover-section').find(
+        (s) => s.find('.popover-section-label').text() === label,
+      )!
+    expect(sectionByLabel('L2 会话摘要').findAll('.popover-section-item').map((i) => i.text()))
+      .toEqual(['[L2] 父摘要X', '[L2] 父摘要Y'])
+    expect(sectionByLabel('L1 近期摘要').findAll('.popover-section-item').map((i) => i.text()))
+      .toEqual(['[L1] 子条目A'])
+  })
 })
+
