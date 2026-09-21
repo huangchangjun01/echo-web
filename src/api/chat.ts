@@ -23,6 +23,7 @@
  */
 
 import request from './index'
+import { useAuthStore } from '@/stores/auth'
 import type {
   ChatAttachment,
   ChatContextInfo,
@@ -462,12 +463,20 @@ export function sendChatMessageStream(
     payload.sessionId,
   )
 
+  // SSE 用原生 fetch，不走 axios 拦截器，需手动注入登录 session 到 X-Session-Id 头。
+  // body.sessionId 是「聊天会话 id」(localSessionId, 记忆隔离用)，两者必须分离：
+  // 后端鉴权中间件从 header 取登录 session 校验，body.sessionId 只作 echo-ai 的历史隔离键。
+  const authStore = useAuthStore()
+  const sid = authStore.sessionId
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+  }
+  if (sid) headers['X-Session-Id'] = sid
+
   fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
+    headers,
     body,
     signal: controller.signal,
   })

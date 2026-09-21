@@ -1013,7 +1013,10 @@ async function handleSend() {
     return
   }
 
-  const wireSessionId = chatStore.sessionId || localSessionId
+  // 后端会话隔离必须用「聊天会话级 ID」(localSessionId, nanoid)，
+  // 不能用 chatStore.sessionId（登录 token）：否则同一登录下的所有聊天会话
+  // 在后端共用同一个 session_id，多轮历史(recent_messages)跨会话串线。
+  const wireSessionId = localSessionId
 
   if (isListening.value) {
     shouldResumeListening.value = true
