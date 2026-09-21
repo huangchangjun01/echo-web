@@ -977,6 +977,13 @@ async function scrollToBottom() {
   if (messagesArea.value) {
     messagesArea.value.scrollTop = messagesArea.value.scrollHeight
   }
+  // 二次补偿：图片加载 / markdown 渲染 / 面板过渡等异步布局会继续改变高度，
+  // 下一帧再滚一次，保证停在真正的底部。
+  requestAnimationFrame(() => {
+    if (messagesArea.value) {
+      messagesArea.value.scrollTop = messagesArea.value.scrollHeight
+    }
+  })
 }
 
 /* ---- useChatStream 封装：把 SSE 帧映射到本地状态 + store ---- */
@@ -1044,14 +1051,10 @@ async function handleSend() {
     streamingReasoningText.value += chunk
   })
 
-  const messageString = session.messages
-    .filter((m) => m.id !== assistantMsg.id)
-    .filter((m) => m.content && m.content.trim().length > 0)
-    .map((m) => {
-      const roleLabel = m.role === 'user' ? 'user' : m.role === 'assistant' ? 'assistant' : 'system'
-      return `${roleLabel}: ${m.content}`
-    })
-    .join('\n\n')
+  // 业界 messages[] 协议：只发当前输入，多轮历史由 echo-ai 按 sessionId 从
+  // chat_messages 加载（服务端状态）；不再把全部历史拼成 message 撞 4096 上限。
+  // message 字段同时透传当前输入，兼容尚未升级的后端实例。
+  const currentUserText = text.trim()
 
   startStream(
     {
@@ -1059,7 +1062,8 @@ async function handleSend() {
       userId: chatStore.userId,
       sessionId: wireSessionId,
       roleId: rolesStore.currentRoleId || 'default',
-      message: messageString,
+      message: currentUserText,
+      messages: [{ role: 'user', content: currentUserText }],
     },
     {
       onChunk: (chunk) => {
@@ -1108,6 +1112,8 @@ async function handleSend() {
         presenceText.value = ''
         chatStore.setStreamingMessageId(null)
         chatStore.isStreaming = false
+        // 输出完成：冲刷剩余内容 + 操作栏/面板收起会改变高度，必须再滚一次到底部
+        scrollToBottom()
         const shouldSpeak =
           (autoPlay.value || (chatMode.value === 'pixel' && pixelAutoListen.value)) &&
           lastMsg &&
@@ -1128,6 +1134,7 @@ async function handleSend() {
         chatStore.setStreamingMessageId(null)
         chatStore.isStreaming = false
         ElMessage.error(`请求失败: ${error.message}`)
+        scrollToBottom()
         resumeListeningIfNeeded()
       },
     },
@@ -1209,6 +1216,15 @@ watch(
   () => chatStore.currentSessionId,
   async () => {
     await scrollToBottom()
+  },
+)
+
+// 流式结束（成功/失败/手动停止）后，等 DOM 渲染稳定再滚一次到底部，
+// 覆盖操作栏出现、面板收起、图片加载等「完成时」的异步高度变化。
+watch(
+  () => chatStore.isStreaming,
+  (streaming) => {
+    if (!streaming) scrollToBottom()
   },
 )
 

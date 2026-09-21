@@ -12,6 +12,8 @@
  *       answer         → message.content 预览
  *   - 点击 popover 外部或再次点击同一胶囊 → 关闭
  *   - 点击其他胶囊 → 切换到那个胶囊的 popover
+ *   - 子项（思考 / 人格 / L0 / L1 / L2 / …）默认全部折叠，点击子项名称展开内容，
+ *     再次点击折叠；展开状态按胶囊隔离，切换胶囊互不串扰
  *   - 子项名称行 position: sticky：内容较长向下滚动时，当前子项名称始终钉在
  *     popover 顶部一行，便于随时点击折叠
  */
@@ -67,10 +69,11 @@ function onDocClick(e: MouseEvent) {
 document.addEventListener('click', onDocClick)
 onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
-// ---------- popover 子项折叠状态 ----------
-// 子项（思考 / 人格 / L0 核心记忆 / L1 近期摘要 / 召回命中 / …）名称可点击折叠/展开，
-// 折叠状态按「胶囊阶段 + 子项序号」隔离：切换胶囊互不串扰，默认全部展开（保持原展示行为）。
-const collapsedSections = ref<Set<string>>(new Set())
+// ---------- popover 子项展开状态 ----------
+// 子项（思考 / 人格 / L0 核心记忆 / L1 近期摘要 / 召回命中 / …）默认全部折叠，
+// 鼠标点击子项名称才展开该子项内容，再次点击折叠。
+// 展开状态按「胶囊阶段 + 子项序号」隔离：切换胶囊互不串扰。
+const expandedSections = ref<Set<string>>(new Set())
 
 function sectionKey(idx: number): string | null {
   const stage = openStage.value
@@ -80,18 +83,18 @@ function sectionKey(idx: number): string | null {
 function toggleSection(idx: number) {
   const key = sectionKey(idx)
   if (!key) return
-  const next = new Set(collapsedSections.value)
+  const next = new Set(expandedSections.value)
   if (next.has(key)) {
     next.delete(key)
   } else {
     next.add(key)
   }
-  collapsedSections.value = next
+  expandedSections.value = next
 }
 
-function isSectionCollapsed(idx: number): boolean {
+function isSectionExpanded(idx: number): boolean {
   const key = sectionKey(idx)
-  return key ? collapsedSections.value.has(key) : false
+  return key ? expandedSections.value.has(key) : false
 }
 
 // ---------- popover 内容 ----------
@@ -275,15 +278,15 @@ const popoverEntries = computed<PopoverBlock[]>(() => {
           <button
             type="button"
             class="popover-section-head"
-            :class="{ 'popover-section-head--collapsed': isSectionCollapsed(idx) }"
-            :aria-expanded="!isSectionCollapsed(idx)"
+            :class="{ 'popover-section-head--collapsed': !isSectionExpanded(idx) }"
+            :aria-expanded="isSectionExpanded(idx)"
             @click="toggleSection(idx)"
           >
-            <span class="popover-section-caret" aria-hidden="true">{{ isSectionCollapsed(idx) ? '▸' : '▾' }}</span>
+            <span class="popover-section-caret" aria-hidden="true">{{ isSectionExpanded(idx) ? '▾' : '▸' }}</span>
             <span class="popover-section-label">{{ entry.label }}</span>
             <span v-if="entry.meta" class="popover-section-meta">{{ entry.meta }}</span>
           </button>
-          <template v-if="!isSectionCollapsed(idx)">
+          <template v-if="isSectionExpanded(idx)">
             <pre v-if="entry.kind === 'text'" class="popover-section-text">{{ entry.text }}</pre>
             <ol v-else class="popover-section-list">
               <li v-for="(item, i) in entry.items" :key="i" class="popover-section-item">{{ item }}</li>
