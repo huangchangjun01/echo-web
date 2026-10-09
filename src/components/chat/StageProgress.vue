@@ -18,18 +18,18 @@
  *     popover 顶部一行，便于随时点击折叠
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
-import type { ChatThinkingEvent, StageName, StageState } from '@/types/chat'
+import type { ChatContextInfo, ChatToolCall, ChatMemoryRecall, ChatThinkingEvent, StageName, StageState } from '@/types/chat'
 
 const props = defineProps<{
   stageState: Record<StageName, StageState>
   /** thinking 流（可能为空）；popover 内容来源 */
   thinkings?: ChatThinkingEvent[]
   /** 工具调用列表 */
-  toolCalls?: { name: string; iter: number; ok: boolean; summary: string }[]
+  toolCalls?: ChatToolCall[]
   /** 回忆召回命中 */
-  memoryRecall?: { count: number; hits: { memoryId: string; topic: string; summary: string; similarity: number }[] }
+  memoryRecall?: ChatMemoryRecall
   /** 上下文摘要 */
-  context?: { personaLen: number; l0Count: number; l1Count: number; persona?: string; l0Items?: string[]; l1Items?: string[] }
+  context?: ChatContextInfo
   /** 流式实时打字机文本（model_reasoning 阶段实时输出） */
   streamingReasoning?: string
   /** 答案正文 */
@@ -135,13 +135,26 @@ const popoverEntries = computed<PopoverBlock[]>(() => {
 
   if (stage === 'intent') {
     const ts = thinkingsFor('intent')
+    const ctx = props.context
+
+    // 历史消息里 thinking + context 都不会从 DB 回传(后端 list_messages 协议只带 content)。
+    // 这种"完全无数据"的情况下,把两个空 placeholder 合并成一条说明,避免用户看到
+    // 「思考（无）」「上下文（无）」两条伪信息。
+    if (ts.length === 0 && !ctx) {
+      out.push({
+        label: '上下文',
+        kind: 'text',
+        text: '（历史消息未保存此阶段的原始数据）',
+      })
+      return out
+    }
+
     out.push({
       label: '思考',
       kind: 'text',
       text: ts.length ? ts.map((t) => t.text).join('\n\n') : '（该阶段未产生思考文本）',
     })
 
-    const ctx = props.context
     if (ctx) {
       // 人格块
       out.push({
@@ -160,10 +173,14 @@ const popoverEntries = computed<PopoverBlock[]>(() => {
         items: ctx.l0Items && ctx.l0Items.length ? ctx.l0Items : undefined,
       })
       // L1 / L2 拆分：优先用后端结构化 l2_items；老后端只下发混合 l1_items 时按 [L2] 前缀拆分
-      const hasL2Field = Array.isArray(ctx.l2Items)
       const rawL1Items = ctx.l1Items ?? []
-      const l2Items = hasL2Field ? ctx.l2Items : rawL1Items.filter((i) => i.startsWith('[L2]'))
-      const l1Items = hasL2Field ? rawL1Items : rawL1Items.filter((i) => !i.startsWith('[L2]'))
+      const l2Source = ctx.l2Items
+      const l2Items: string[] = Array.isArray(l2Source)
+        ? l2Source
+        : rawL1Items.filter((i) => i.startsWith('[L2]'))
+      const l1Items: string[] = Array.isArray(l2Source)
+        ? rawL1Items
+        : rawL1Items.filter((i) => !i.startsWith('[L2]'))
       // L1 块
       out.push({
         label: 'L1 近期摘要',
@@ -182,7 +199,7 @@ const popoverEntries = computed<PopoverBlock[]>(() => {
         })
       }
     } else {
-      out.push({ label: '上下文', kind: 'text', text: '（无 context 数据）' })
+      out.push({ label: '上下文', kind: 'text', text: '（该阶段未产生 context 数据）' })
     }
     return out
   }

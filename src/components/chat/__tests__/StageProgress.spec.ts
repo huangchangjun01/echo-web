@@ -148,4 +148,55 @@ describe('StageProgress', () => {
     expect(sectionByLabel('L1 近期摘要').findAll('.popover-section-item').map((i) => i.text()))
       .toEqual(['[L1] 子条目A'])
   })
+
+  // 历史消息的「意图」胶囊:thinking + context 都没从 DB 回传,
+  // 不应该再渲染两条伪 placeholder ("思考（无）" + "上下文（无）"),
+  // 而是合并成一条「历史消息未保存此阶段的原始数据」。
+  it('意图胶囊:无 thinking + 无 context → 只渲染一条说明（历史消息场景）', async () => {
+    const wrapper = mount(StageProgress, {
+      props: {
+        stageState: { ...idleState, intent: 'done' },
+        // 没有 thinkings、没有 context → 模拟历史消息
+      },
+    })
+    await wrapper.findAll('.stage-chip')[0].trigger('click')
+    const heads = wrapper.findAll('.popover-section-head')
+    expect(heads).toHaveLength(1)
+    expect(heads[0].find('.popover-section-label').text()).toBe('上下文')
+    // 展开后只显示一条说明文字
+    await heads[0].trigger('click')
+    const texts = wrapper.findAll('.popover-section-text').map((t) => t.text())
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toBe('（历史消息未保存此阶段的原始数据）')
+  })
+
+  it('意图胶囊:有 thinking 但无 context → 渲染思考 + 上下文占位', async () => {
+    const wrapper = mount(StageProgress, {
+      props: {
+        stageState: { ...idleState, intent: 'done' },
+        thinkings: [{ stage: 'intent', text: '用户问天气' }],
+        // 没有 context
+      },
+    })
+    await wrapper.findAll('.stage-chip')[0].trigger('click')
+    const heads = wrapper.findAll('.popover-section-head')
+    expect(heads).toHaveLength(2)
+    expect(heads[0].find('.popover-section-label').text()).toBe('思考')
+    expect(heads[1].find('.popover-section-label').text()).toBe('上下文')
+  })
+
+  it('意图胶囊:无 thinking 但有 context → 仍渲染 5 个块（思考占位 + 人格/L0/L1/L2）', async () => {
+    const wrapper = mount(StageProgress, {
+      props: {
+        stageState: { ...idleState, intent: 'done' },
+        context: { personaLen: 5, l0Count: 0, l1Count: 0, persona: '人格' },
+      },
+    })
+    await wrapper.findAll('.stage-chip')[0].trigger('click')
+    const heads = wrapper.findAll('.popover-section-head')
+    // 思考(占位)+ 人格/L0/L1 共 4 个（L2 没数据时不渲染）
+    expect(heads).toHaveLength(4)
+    expect(heads[0].find('.popover-section-label').text()).toBe('思考')
+    expect(heads[1].find('.popover-section-label').text()).toBe('人格')
+  })
 })

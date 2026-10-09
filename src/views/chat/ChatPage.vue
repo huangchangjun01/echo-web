@@ -1,69 +1,10 @@
 <template>
   <div class="echo-layout">
-    <!-- Sidebar: sessions list -->
-    <aside class="echo-sidebar" :class="{ 'is-collapsed': sidebarCollapsed }">
-      <div class="sidebar-header">
-        <button class="new-chat-btn" @click="handleNewChat">
-          <el-icon><Plus /></el-icon>
-          <span v-if="!sidebarCollapsed">新对话</span>
-        </button>
-        <!-- 模式切换：文本对话 / 像素人物 -->
-        <div v-if="!sidebarCollapsed" class="mode-switcher" role="tablist" aria-label="对话模式">
-          <button
-            class="mode-switcher__btn"
-            :class="{ 'mode-switcher__btn--active': chatMode === 'text' }"
-            role="tab"
-            :aria-selected="chatMode === 'text'"
-            @click="handleSwitchMode('text')"
-            title="文本对话"
-          >
-            <el-icon><ChatDotRound /></el-icon>
-            <span>对话</span>
-          </button>
-          <button
-            class="mode-switcher__btn"
-            :class="{ 'mode-switcher__btn--active': chatMode === 'pixel' }"
-            role="tab"
-            :aria-selected="chatMode === 'pixel'"
-            @click="handleSwitchMode('pixel')"
-            title="像素人物"
-          >
-            <el-icon><UserFilled /></el-icon>
-            <span>像素</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="sessions-list" v-show="!sidebarCollapsed">
-        <div
-          v-for="session in chatStore.sessions"
-          :key="session.id"
-          class="session-item"
-          :class="{ 'session-item--active': chatStore.currentSessionId === session.id }"
-          @click="chatStore.currentSessionId = session.id"
-        >
-          <el-icon class="session-icon"><ChatDotRound /></el-icon>
-          <span class="session-title">{{ session.title }}</span>
-          <button
-            class="session-delete"
-            @click.stop="chatStore.deleteSession(session.id)"
-            title="删除"
-          >
-            <el-icon><Close /></el-icon>
-          </button>
-        </div>
-        <div v-if="chatStore.sessions.length === 0" class="sessions-empty">
-          <p>暂无对话记录</p>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Toggle sidebar button -->
-    <button class="sidebar-toggle" @click="toggleSidebar" :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'">
-      <el-icon v-if="sidebarCollapsed"><DArrowRight /></el-icon>
-      <el-icon v-else><DArrowLeft /></el-icon>
-    </button>
-
+    <!--
+      单角色单会话产品模型下,不再有侧栏 / 会话列表 / 新建 / 删除 / 重命名.
+      每个 (user, role) 对应唯一一行 chat_sessions,切换角色 = 切换唯一对话.
+      历史通过滚动浏览 + 日期筛选查看(见下方 messages-area 顶部的 sentinel).
+    -->
     <!-- Main chat area -->
     <div class="chat-main">
       <!-- ==================== 文本对话模式 ==================== -->
@@ -156,11 +97,89 @@
       </div>
 
       <template v-else>
+        <!--
+          历史只读浏览工具栏 + 双向滚动加载哨兵.
+          - 「历史」按钮:点开 el-popover + el-calendar,绿点标出有对话的日期;
+            点击日期 → 设置 anchorDate(一次性首屏锚定) → loadInitialHistory(startDate=endDate) → scrollToTop
+            之后上滑触顶 → loadOlderMessages(before) 翻更早(可跨天);
+            下滑触底 → loadNewerMessages(after) 翻更新(可跨天)。
+          - 顶部哨兵:IntersectionObserver 进入视口时触发 loadOlderMessages()
+          - 底部哨兵:onMessagesScroll 触底检测触发 loadNewerMessages()
+        -->
+        <div class="messages-toolbar">
+          <!--
+            历史日历入口:点击按钮弹出 el-popover 包 el-calendar,
+            日期格里根据 sessionDates Set 渲染绿点;点击日期进入跨天滚动模式。
+          -->
+          <el-popover
+            v-model:visible="historyPopoverOpen"
+            placement="bottom-end"
+            :width="340"
+            trigger="manual"
+            popper-class="history-calendar-popover"
+          >
+            <template #reference>
+              <button
+                class="history-btn"
+                :class="{ 'history-btn--active': historyPopoverOpen }"
+                title="按日历查看历史对话"
+                @click="handleHistoryClick"
+              >
+                <el-icon><Calendar /></el-icon>
+                <span>历史</span>
+              </button>
+            </template>
+            <div class="history-calendar">
+              <el-calendar v-model="historyCalendarDate">
+                <template #date-cell="{ data }">
+                  <div
+                    class="history-calendar__cell"
+                    :class="{ 'history-calendar__cell--has': sessionDates.has(data.day) }"
+                    :title="sessionDates.has(data.day) ? `${data.day} 有对话` : data.day"
+                    @click.stop="handleDatePick(data.day)"
+                  >
+                    <span class="history-calendar__day">{{ Number(data.day.split('-')[2]) }}</span>
+                    <span
+                      v-if="sessionDates.has(data.day)"
+                      class="history-calendar__dot"
+                    />
+                  </div>
+                </template>
+              </el-calendar>
+              <div class="history-calendar__legend">
+                <span class="history-calendar__dot history-calendar__dot--inline" />
+                <span>表示当天有对话</span>
+              </div>
+              <div class="history-calendar__hint">
+                点击带绿点的日期，查看当天对话（可上下滑动跨天浏览）
+              </div>
+            </div>
+          </el-popover>
+        </div>
+
         <!-- Messages area -->
-        <div class="messages-area" ref="messagesArea">
+        <div class="messages-area" ref="messagesArea" @scroll="onMessagesScroll">
+          <!--
+            滚动到顶部哨兵 + 「已加载全部记忆」兜底.
+            三态:
+              1. hasOlderHistory=true && loadingOlder=true        → 「加载中…」
+              2. hasOlderHistory=true && loadingOlder=false       → 「上滑加载更早的历史」
+              3. !hasOlderHistory && messages.length>0           → 「已加载全部记忆」
+              4. !hasOlderHistory && messages.length===0         → 不显示(全新对话)
+          -->
+          <div
+            v-if="historyIndicator !== 'none'"
+            ref="historySentinel"
+            class="history-sentinel"
+            :class="`history-sentinel--${historyIndicator}`"
+          >
+            <span v-if="historyIndicator === 'loading'" class="history-sentinel__loading">加载中…</span>
+            <span v-else-if="historyIndicator === 'hint'" class="history-sentinel__hint">上滑加载更早的历史</span>
+            <span v-else-if="historyIndicator === 'exhausted'" class="history-sentinel__hint">已加载全部记忆</span>
+          </div>
           <div class="messages-inner">
             <div
-              v-for="msg in chatStore.currentSession.messages"
+              v-for="msg in chatStore.currentSession?.messages ?? []"
               :key="msg.id"
               class="message-wrapper"
               :class="`message-wrapper--${msg.role}`"
@@ -203,62 +222,81 @@
                   </span>
                 </template>
               </div>
-              <div class="message-bubble" :class="`message-bubble--${msg.role}`">
-                <div v-if="editingMessageId === msg.id" class="edit-wrapper">
-                  <el-input
-                    v-model="editingText"
-                    type="textarea"
-                    :rows="2"
-                    placeholder="修改内容"
-                    class="edit-input"
-                    @keydown.enter.exact.prevent="handleSaveEdit(msg.id)"
-                    @keydown.esc="handleCancelEdit"
-                  />
-                  <div class="edit-actions">
-                    <button class="edit-btn edit-btn--cancel" @click="handleCancelEdit">取消</button>
-                    <button class="edit-btn edit-btn--save" @click="handleSaveEdit(msg.id)">发送</button>
+              <!--
+                message-bubble-col:把 bubble + 时间戳包成一个 column,
+                让 bubble 始终贴在自己的对齐边(assistant 左、user 右),
+                时间戳跟 bubble 同一侧对齐,不会被 actions / avatar 推跑。
+              -->
+              <div class="message-bubble-col" :class="`message-bubble-col--${msg.role}`">
+                <div class="message-bubble" :class="`message-bubble--${msg.role}`">
+                  <div v-if="editingMessageId === msg.id" class="edit-wrapper">
+                    <el-input
+                      v-model="editingText"
+                      type="textarea"
+                      :rows="2"
+                      placeholder="修改内容"
+                      class="edit-input"
+                      @keydown.enter.exact.prevent="handleSaveEdit(msg.id)"
+                      @keydown.esc="handleCancelEdit"
+                    />
+                    <div class="edit-actions">
+                      <button class="edit-btn edit-btn--cancel" @click="handleCancelEdit">取消</button>
+                      <button class="edit-btn edit-btn--save" @click="handleSaveEdit(msg.id)">发送</button>
+                    </div>
                   </div>
+                  <template v-else>
+                    <!-- 语音消息：播报按钮 + 识别文本框 -->
+                    <div v-if="msg.source === 'voice'" class="voice-block">
+                      <div class="voice-block__header">
+                        <el-icon class="voice-block__icon"><Microphone /></el-icon>
+                        <span class="voice-block__label">语音消息</span>
+                      </div>
+                      <button
+                        class="voice-play-btn"
+                        :class="{ 'voice-play-btn--playing': speakingId === msg.id }"
+                        @click="handleTogglePlay(msg)"
+                        :title="speakingId === msg.id ? '停止播报' : '语音播报'"
+                      >
+                        <el-icon>
+                          <VideoPause v-if="speakingId === msg.id" />
+                          <VideoPlay v-else />
+                        </el-icon>
+                        <span>{{ speakingId === msg.id ? '停止播报' : '语音播报' }}</span>
+                      </button>
+                      <div class="voice-text-box" :title="msg.content">
+                        {{ msg.content || '(未识别到内容)' }}
+                      </div>
+                    </div>
+                    <!--
+                      普通 assistant 消息：改用 StreamingBubble 聚合组件。
+                      把所有流式 / 折叠面板 / 操作栏都交给子组件处理,
+                      这里只负责传入数据 (msg + isStreaming + streamingReasoning)。
+                    -->
+                    <StreamingBubble
+                      v-else-if="msg.role === 'assistant'"
+                      :message="msg"
+                      :is-streaming="msg.id === chatStore.streamingMessageId"
+                      :streaming-reasoning="msg.id === chatStore.streamingMessageId ? streamingReasoningText : ''"
+                      class="message-streaming"
+                      @feedback="onAssistantFeedback"
+                    />
+                    <!-- 用户消息：直接展示 -->
+                    <div v-else class="message-content">
+                      <span v-if="msg.content">{{ msg.content }}</span>
+                    </div>
+                  </template>
                 </div>
-                <template v-else>
-                  <!-- 语音消息：播报按钮 + 识别文本框 -->
-                  <div v-if="msg.source === 'voice'" class="voice-block">
-                    <div class="voice-block__header">
-                      <el-icon class="voice-block__icon"><Microphone /></el-icon>
-                      <span class="voice-block__label">语音消息</span>
-                    </div>
-                    <button
-                      class="voice-play-btn"
-                      :class="{ 'voice-play-btn--playing': speakingId === msg.id }"
-                      @click="handleTogglePlay(msg)"
-                      :title="speakingId === msg.id ? '停止播报' : '语音播报'"
-                    >
-                      <el-icon>
-                        <VideoPause v-if="speakingId === msg.id" />
-                        <VideoPlay v-else />
-                      </el-icon>
-                      <span>{{ speakingId === msg.id ? '停止播报' : '语音播报' }}</span>
-                    </button>
-                    <div class="voice-text-box" :title="msg.content">
-                      {{ msg.content || '(未识别到内容)' }}
-                    </div>
-                  </div>
-                  <!--
-                    普通 assistant 消息：改用 StreamingBubble 聚合组件。
-                    把所有流式 / 折叠面板 / 操作栏都交给子组件处理，
-                    这里只负责传入数据 (msg + isStreaming + streamingReasoning)。
-                  -->
-                  <StreamingBubble
-                    v-else-if="msg.role === 'assistant'"
-                    :message="msg"
-                    :is-streaming="msg.id === chatStore.streamingMessageId"
-                    :streaming-reasoning="msg.id === chatStore.streamingMessageId ? streamingReasoningText : ''"
-                    class="message-streaming"
-                  />
-                  <!-- 用户消息：直接展示 -->
-                  <div v-else class="message-content">
-                    <span v-if="msg.content">{{ msg.content }}</span>
-                  </div>
-                </template>
+                <!--
+                  时间戳:bubble 下方一行小字,智能格式
+                  (今天 HH:MM / 本年内 MM-DD HH:MM / 跨年 YYYY-MM-DD HH:MM)。
+                  编辑态下隐藏(避免与 textarea 挤一起)。title 给完整时间。
+                -->
+                <div
+                  v-if="!editingMessageId || msg.role !== 'user'"
+                  class="message-time"
+                  :class="`message-time--${msg.role}`"
+                  :title="formatMessageTimeFull(msg.createdAt)"
+                >{{ formatMessageTime(msg.createdAt) }}</div>
               </div>
               <div class="message-actions" v-if="msg.role === 'user' && !editingMessageId">
                 <button class="action-btn" @click="handleCopy(msg.content)" title="复制">
@@ -272,6 +310,21 @@
                 </button>
               </div>
             </div>
+          </div>
+          <!--
+            滚动到底部哨兵 + 「已是最新对话」兜底.
+            二态(底部不主动提示「下滑加载更多」,静默触发即可):
+              1. newerIndicator='loading'   → 正在加载更新一页
+              2. newerIndicator='exhausted' → !hasNewerHistory && 已加载非空 → 「已是最新对话」
+              3. newerIndicator='none'      → 还有更多可加载 或 全新对话 → 不显示
+          -->
+          <div
+            v-if="newerIndicator !== 'none'"
+            class="history-newer-sentinel"
+            :class="`history-newer-sentinel--${newerIndicator}`"
+          >
+            <span v-if="newerIndicator === 'loading'" class="history-newer-sentinel__loading">加载中…</span>
+            <span v-else-if="newerIndicator === 'exhausted'" class="history-newer-sentinel__hint">已是最新对话</span>
           </div>
         </div>
 
@@ -547,28 +600,24 @@
 <script setup lang="ts">
 import { ref, nextTick, watch, onMounted, computed, onBeforeUnmount } from 'vue'
 import {
-  Plus,
   Close,
-  ChatDotRound,
   UserFilled,
   Promotion,
   VideoPause,
   VideoPlay,
   CopyDocument,
   RefreshRight,
-  Edit,
-  DArrowLeft,
-  DArrowRight,
   Microphone,
   CircleClose,
   Headset,
   Mute,
   Document,
+  Calendar,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { useChatStore } from '@/stores/chat'
+import { useChatStore, messageItemToMessage } from '@/stores/chat'
 import { useRolesStore } from '@/stores/roles'
-import type { ChatSession, Message } from '@/types/chat'
+import type { Message } from '@/types/chat'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import { useSpeechSynthesis } from '@/composables/useSpeechSynthesis'
 import { useChatStream } from '@/composables/useChatStream'
@@ -579,20 +628,162 @@ import PixelScene from '@/components/PixelScene.vue'
 import StreamingBubble from '@/components/chat/StreamingBubble.vue'
 import ChatMarkdown from '@/components/chat/ChatMarkdown.vue'
 import { detectEmotion, EMOTION_LABELS, type Emotion } from '@/utils/emotion'
+import { sessionIdFor } from '@/utils/sessionId'
+import { listSessionMessages, listSessionDates } from '@/api/session'
 
 const chatStore = useChatStore()
 const rolesStore = useRolesStore()
+
+/**
+ * 单会话模型下:全局只有一条流(isStreaming = true/false)。所有 UI 守卫直接
+ * 读 ``chatStore.isStreaming`` 即可,不需要 per-session 区分。
+ */
 const inputText = ref('')
 const emptyInputText = ref('')
 const messagesArea = ref<HTMLElement | null>(null)
 const editingMessageId = ref<string | null>(null)
 const editingText = ref('')
-const sidebarCollapsed = ref(false)
 /** 标记下一条待发送消息的来源（语音 / 文本），handleSend 消费后重置为 text */
 const pendingSource = ref<'text' | 'voice'>('text')
 
+/* ---- 历史只读浏览：双向滚动加载（before / after 游标）---- */
+/** 一次性日期锚定:handleDatePick 设置后,loadInitialHistory 当次会带 startDate=endDate,
+ *  加载完后立刻清空;loadOlderMessages/loadNewerMessages 不再读它(后续纯游标跨天)。
+ */
+const anchorDate = ref<string | null>(null)
+/** 触顶哨兵 ref（IntersectionObserver 观察） */
+const historySentinel = ref<HTMLElement | null>(null)
+/** 当前是否还有更早的历史页可加载 */
+const hasOlderHistory = ref(false)
+/** 向前翻页游标 —— 传给后端 list_messages 的 nextBefore */
+const historyCursor = ref<string | null>(null)
+/** 加载更早历史时是否在请求中（防止重复触发） */
+const loadingOlder = ref(false)
+/** 当前是否还有比当前已加载更新的消息可加载 */
+const hasNewerHistory = ref(false)
+/** 向后翻页游标 —— 比当前已加载最新一条还新的下一页起点(nextAfter) */
+const newerCursor = ref<string | null>(null)
+/** 加载更新一页时是否在请求中（防止重复触发） */
+const loadingNewer = ref(false)
+
+/* ---- 历史日历视图:列出有消息的日期 + 点击跳转 ---- */
+/** 弹窗是否打开(用 manual trigger 自己控制开合) */
+const historyPopoverOpen = ref(false)
+/** 当前会话有消息的日期集合(YYYY-MM-DD),用于日历绿点指示器 */
+const sessionDates = ref<Set<string>>(new Set())
+/** 日历是否正在拉取有消息的日期(避免重复请求) */
+const historyCalendarLoading = ref(false)
+/** el-calendar 内部用:当前展示的月份;v-model 让它能翻页 */
+const historyCalendarDate = ref<Date>(new Date())
+
+/**
+ * 拉取当前会话所有有消息的日期,用于日历视图。
+ * 单会话模型下 (user, role) 必唯一 —— 后端用 sessionIdFor(user, role) 兜底即可。
+ * 不传 sessionId 也行,但显式传入能让后端日志更清晰。
+ */
+async function loadSessionDates(): Promise<void> {
+  if (historyCalendarLoading.value) return
+  historyCalendarLoading.value = true
+  try {
+    const resp = await listSessionDates({
+      userId: chatStore.userId,
+      sessionId: localSessionId.value,
+      roleId: rolesStore.currentRoleId || 'default',
+      limit: 365,
+    })
+    if (resp.ok) {
+      sessionDates.value = new Set(resp.dates.map((d) => d.date))
+      console.info('[chat] history dates loaded', JSON.stringify({ count: resp.dates.length, sample: resp.dates.slice(0, 3) }))
+    } else {
+      sessionDates.value = new Set()
+      console.warn('[chat] history dates biz error:', resp.error)
+    }
+  } catch (e) {
+    sessionDates.value = new Set()
+    console.warn('[chat] history dates failed:', e)
+  } finally {
+    historyCalendarLoading.value = false
+  }
+}
+
+/**
+ * 「历史」按钮点击:首次打开时拉一次日期列表,后续切复直接切弹窗开合。
+ */
+async function handleHistoryClick(): Promise<void> {
+  const next = !historyPopoverOpen.value
+  historyPopoverOpen.value = next
+  if (next && sessionDates.value.size === 0 && !historyCalendarLoading.value) {
+    await loadSessionDates()
+  }
+}
+
+/**
+ * 日历点击某一天:进入跨天滚动浏览模式。
+ *  - 设 anchorDate,loadInitialHistory 当次带 startDate=endDate=picked 拉当天全部;
+ *  - 加载完后锚定立刻清空,后续 loadOlder/loadNewerMessages 走纯游标(可能跨天);
+ *  - 滚到顶部(当天最早一条在最上),由用户自然向下滑动看更新,向上滑动看更早。
+ *
+ * el-calendar 在 date-cell slot 的 click 事件里传 ``YYYY-MM-DD`` 字符串,
+ * 在 v-model 同步时会传 Date 对象;两种都做兼容。
+ */
+function handleDatePick(value: Date | string): void {
+  let picked: string
+  if (typeof value === 'string') {
+    picked = value
+  } else {
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    picked = `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`
+  }
+  historyPopoverOpen.value = false
+  // 锚定模式:首次 loadInitialHistory 带 startDate=endDate=picked,加载完后游标自然衔接
+  anchorDate.value = picked
+  void (async () => {
+    await loadInitialHistory()
+    await scrollToTop()
+    console.info('[chat] history date picked', JSON.stringify({ picked }))
+  })()
+}
+
+/**
+ * 历史顶部哨兵的三态指示:
+ *   - 'none'      没消息或不需要显示(全新会话)
+ *   - 'loading'   正在加载更早一页
+ *   - 'hint'      还有更早页可加载(滚动到顶)
+ *   - 'exhausted' 已加载到最早一条 —— 让用户明确知道「再上滑也不会有新数据」
+ */
+const historyIndicator = computed<'none' | 'loading' | 'hint' | 'exhausted'>(() => {
+  const session = chatStore.currentSession
+  if (!session || session.messages.length === 0) return 'none'
+  if (loadingOlder.value) return 'loading'
+  if (hasOlderHistory.value) return 'hint'
+  return 'exhausted'
+})
+
+/**
+ * 历史底部哨兵指示(单边):
+ *   - 'none'      还有更新可加载,或全新对话 → 不显示(静默滚动加载即可)
+ *   - 'loading'   正在加载更新一页
+ *   - 'exhausted' !hasNewerHistory && 已加载非空 → 「已是最新对话」
+ */
+const newerIndicator = computed<'none' | 'loading' | 'exhausted'>(() => {
+  const session = chatStore.currentSession
+  if (!session || session.messages.length === 0) return 'none'
+  if (loadingNewer.value) return 'loading'
+  if (!hasNewerHistory.value) return 'exhausted'
+  return 'none'
+})
+
+/**
+ * (user, role) → deterministic session_id(32 hex)。与后端 biz/chat_sessions.session_id_for 算法一致。
+ * 用于把消息写到正确的 chat_sessions 行（按 (user, role) 唯一的那一行）。
+ */
+const localSessionId = computed(() =>
+  sessionIdFor(chatStore.userId, rolesStore.currentRoleId || 'default'),
+)
+
 /* ---- 对话模式：文本 / 像素人物 ---- */
 type ChatMode = 'text' | 'pixel'
+
 const CHAT_MODE_KEY = 'chat_mode'
 function loadChatMode(): ChatMode {
   try {
@@ -918,10 +1109,247 @@ function resumeListeningIfNeeded() {
   })
 }
 
-onMounted(() => {
-  chatStore.initDefaultSession().then(() => {
-    chatStore.ensureAnonymousSession()
-  })
+const quickStarts = [
+  '帮我写一首关于人工智能的诗',
+  '解释一下量子计算的基本原理',
+  '推荐一些提高工作效率的方法',
+  '用 Python 实现一个快速排序算法',
+]
+
+/** =====================================================================
+ * 历史只读浏览：双向滚动加载（before / after 游标）+ 日历一次性日期锚定
+ *
+ * 设计要点：
+ *  - 日历点击日期 → handleDatePick → anchorDate=picked → loadInitialHistory 带
+ *    startDate=endDate=picked 拉当天全部 → scrollToTop；后续纯游标衔接。
+ *  - 触顶加载：用 IntersectionObserver 观察顶部 sentinel，进入视口时调
+ *    listSessionMessages(before=historyCursor) 拉下一页,prepend 到 messages 头部。
+ *  - 触底加载：onMessagesScroll 检测 scrollTop+clientHeight >= scrollHeight 时调
+ *    listSessionMessages(after=newerCursor) 拉下一页,append 到 messages 尾部。
+ *  - 切角色后 (user, role) 改变 → localSessionId 改变 → 重置 messages + 重新加载。
+ * ====================================================================== */
+
+/**
+ * 首次进入或切角色时:拉当前 (user, role) 的最近 N 条消息,保证 scroll-to-bottom
+ * 能停在底部而不是停在 0。
+ *
+ * anchorDate 模式下(``handleDatePick`` 设的):带 startDate=endDate=anchorDate
+ * 一次性锚定,limit 拉够大以覆盖当天全部;加载完后立刻清空 anchorDate,
+ * 后续 loadOlder/loadNewerMessages 走纯游标(可跨天)。
+ */
+async function loadInitialHistory(): Promise<void> {
+  const sid = localSessionId.value
+  // 确保本地有一行 chat_sessions 占位(避免 currentSession 为空,模板渲染 fallback)
+  let session = chatStore.sessions.find((s) => s.id === sid)
+  if (!session) {
+    chatStore.sessions.unshift({
+      id: sid,
+      title: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [],
+      msgCount: 0,
+      loadedCount: 0,
+    })
+    // 重新从 store 取回引用:unshift 进数组的是原始对象,只有通过 reactive proxy
+    // 读写才会触发渲染。若直接持有原始对象写 messages,数据进内存但页面不会更新
+    // (刷新后「有历史消息却显示空白」的根因)。
+    session = chatStore.sessions.find((s) => s.id === sid)
+    if (!session) return
+  }
+  // (单会话模型下,不需要再写 currentSessionId —— sessions[0] 就是当前)
+  // 重置双向分页状态
+  historyCursor.value = null
+  hasOlderHistory.value = false
+  loadingOlder.value = false
+  newerCursor.value = null
+  hasNewerHistory.value = false
+  loadingNewer.value = false
+  // 一次性锚定:handleDatePick 设置 → 当次带 startDate=endDate → 加载后立刻清空
+  const anchoredDate = anchorDate.value
+  const isAnchored = typeof anchoredDate === 'string' && anchoredDate.length > 0
+  if (isAnchored) anchorDate.value = null
+  try {
+    const resp = await listSessionMessages({
+      userId: chatStore.userId,
+      sessionId: sid,
+      // 锚定模式下多拉一些(单天消息通常 < 200),保证覆盖当天全部;
+      // 上限 200 是后端 ListMessagesReq 的 Pydantic le 限制。
+      // 普通进入会话仍走默认 50,避免一次返回过多拖慢首屏。
+      limit: isAnchored ? 200 : 50,
+      roleId: rolesStore.currentRoleId || 'default',
+      startDate: isAnchored ? anchoredDate : undefined,
+      endDate: isAnchored ? anchoredDate : undefined,
+    })
+    console.info(
+      '[chat] loadInitialHistory',
+      JSON.stringify({
+        sid,
+        chatStoreUserId: chatStore.userId,
+        currentRoleId: rolesStore.currentRoleId,
+        anchoredDate: isAnchored ? anchoredDate : null,
+        ok: resp.ok,
+        itemsCount: resp.items?.length ?? 0,
+        nextBefore: resp.nextBefore,
+        nextAfter: resp.nextAfter,
+        error: resp.error,
+      }),
+    )
+    if (resp.ok) {
+      session.messages = resp.items.map(messageItemToMessage)
+      session.loadedCount = session.messages.length
+      session.msgCount = session.messages.length
+      historyCursor.value = resp.nextBefore ?? null
+      hasOlderHistory.value = Boolean(resp.nextBefore)
+      newerCursor.value = resp.nextAfter ?? null
+      hasNewerHistory.value = Boolean(resp.nextAfter)
+    }
+  } catch (e) {
+    console.warn('[chat] loadInitialHistory failed:', e)
+  }
+}
+
+/**
+ * 加载更早一页:用 before 游标拉一页,prepend 到 messages 头部。
+ * 用 scrollHeight 差值保持用户的滚动位置（避免跳到顶部）。
+ *
+ * 翻页走纯游标(不带日期过滤)——日历锚定只在 loadInitialHistory 当次生效,
+ * 后续 loadOlder/loadNewer 由 before/after 游标自然衔接,可能跨天。
+ */
+async function loadOlderMessages(): Promise<void> {
+  if (loadingOlder.value || !hasOlderHistory.value || !historyCursor.value) return
+  const sid = localSessionId.value
+  const session = chatStore.sessions.find((s) => s.id === sid)
+  if (!session) return
+  loadingOlder.value = true
+  const prevScrollHeight = messagesArea.value?.scrollHeight ?? 0
+  try {
+    const resp = await listSessionMessages({
+      userId: chatStore.userId,
+      sessionId: sid,
+      limit: 50,
+      roleId: rolesStore.currentRoleId || 'default',
+      before: historyCursor.value,
+    })
+    if (resp.ok) {
+      const older = resp.items.map(messageItemToMessage)
+      // prepend (id 顺序 ASC, 前端翻页后保留时序)
+      session.messages = [...older, ...session.messages]
+      session.loadedCount = session.messages.length
+      historyCursor.value = resp.nextBefore ?? null
+      hasOlderHistory.value = Boolean(resp.nextBefore)
+      // 等 DOM 更新后,把滚动位置补回到 prepend 之前的位置
+      if (messagesArea.value) {
+        await nextTick()
+        const delta = messagesArea.value.scrollHeight - prevScrollHeight
+        if (delta > 0) messagesArea.value.scrollTop += delta
+      }
+    }
+  } catch (e) {
+    console.warn('[chat] loadOlderMessages failed:', e)
+  } finally {
+    loadingOlder.value = false
+  }
+}
+
+/**
+ * 加载更新一页:用 after 游标拉一页,append 到 messages 尾部。
+ * 不需要 scrollHeight 补偿(append 不影响顶部可见位置),用户继续向下滑动浏览即可。
+ */
+async function loadNewerMessages(): Promise<void> {
+  if (loadingNewer.value || !hasNewerHistory.value || !newerCursor.value) return
+  const sid = localSessionId.value
+  const session = chatStore.sessions.find((s) => s.id === sid)
+  if (!session) return
+  loadingNewer.value = true
+  try {
+    const resp = await listSessionMessages({
+      userId: chatStore.userId,
+      sessionId: sid,
+      limit: 50,
+      roleId: rolesStore.currentRoleId || 'default',
+      after: newerCursor.value,
+    })
+    if (resp.ok) {
+      const newer = resp.items.map(messageItemToMessage)
+      // append(按时间正序追加到尾部,保留时序)
+      session.messages = [...session.messages, ...newer]
+      session.loadedCount = session.messages.length
+      newerCursor.value = resp.nextAfter ?? null
+      hasNewerHistory.value = Boolean(resp.nextAfter)
+    }
+  } catch (e) {
+    console.warn('[chat] loadNewerMessages failed:', e)
+  } finally {
+    loadingNewer.value = false
+  }
+}
+
+/**
+ * 滚动检测兜底:IntersectionObserver 之外做手动触发。
+ *   - 触顶(scrollTop < 40) → loadOlderMessages
+ *   - 触底(scrollTop+clientHeight+100 >= scrollHeight) → loadNewerMessages
+ */
+function onMessagesScroll() {
+  if (!messagesArea.value) return
+  const el = messagesArea.value
+  if (el.scrollTop < 40 && hasOlderHistory.value && !loadingOlder.value) {
+    void loadOlderMessages()
+    return
+  }
+  if (
+    el.scrollTop + el.clientHeight + 100 >= el.scrollHeight &&
+    hasNewerHistory.value &&
+    !loadingNewer.value
+  ) {
+    void loadNewerMessages()
+  }
+}
+
+/** IntersectionObserver:顶部 sentinel 进入视口时触发加载 */
+let historyObserver: IntersectionObserver | null = null
+function setupHistoryObserver() {
+  if (historyObserver) {
+    historyObserver.disconnect()
+    historyObserver = null
+  }
+  const target = historySentinel.value
+  if (!target || typeof IntersectionObserver === 'undefined') return
+  historyObserver = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting && hasOlderHistory.value && !loadingOlder.value) {
+          void loadOlderMessages()
+        }
+      }
+    },
+    { rootMargin: '120px 0px', threshold: 0 },
+  )
+  historyObserver.observe(target)
+}
+
+watch(historySentinel, () => {
+  nextTick(() => setupHistoryObserver())
+})
+
+/**
+ * 切角色时:重新加载该角色的历史。
+ * 监听 rolesStore.currentRoleId 变化触发 —— 角色 = 唯一对话,角色一变 = 进入另一个对话窗口。
+ */
+watch(
+  () => rolesStore.currentRoleId,
+  async (newRoleId, oldRoleId) => {
+    if (newRoleId === oldRoleId) return
+    await loadInitialHistory()
+    await scrollToBottom()
+  },
+  { immediate: false },
+)
+
+onMounted(async () => {
+  // 单会话模型下,启动只需拉一次当前角色的最近消息。侧栏/list 全部下线。
+  await loadInitialHistory()
+  await scrollToBottom()
   if ('speechSynthesis' in window) {
     window.speechSynthesis.onvoiceschanged = () => {
       const all = window.speechSynthesis.getVoices()
@@ -936,38 +1364,38 @@ onMounted(() => {
   }
 })
 
-const quickStarts = [
-  '帮我写一首关于人工智能的诗',
-  '解释一下量子计算的基本原理',
-  '推荐一些提高工作效率的方法',
-  '用 Python 实现一个快速排序算法',
-]
-
-function toggleSidebar() {
-  sidebarCollapsed.value = !sidebarCollapsed.value
-}
-
-function handleNewChat() {
-  if (isListening.value) speech.stop()
-  shouldResumeListening.value = false
-  chatStore.createSession()
+/** assistant 消息评价：把 up/down/none 转成 rating，调 store。 */
+async function onAssistantFeedback(value: 'up' | 'down' | 'none') {
+  const sid = localSessionId.value
+  const session = chatStore.sessions.find((s) => s.id === sid)
+  if (!session) return
+  // 找最后一条 assistant 消息（用户操作的是当前气泡）
+  const lastAssistant = [...session.messages].reverse().find((m) => m.role === 'assistant')
+  if (!lastAssistant) {
+    ElMessage.warning('当前没有可评价的助手回复')
+    return
+  }
+  const rating: 1 | -1 | 0 = value === 'up' ? 1 : value === 'down' ? -1 : 0
+  try {
+    await chatStore.rateMessage(sid, lastAssistant.id, rating)
+    if (rating === 1) ElMessage.success('已点赞')
+    else if (rating === -1) ElMessage.success('已反馈')
+    else ElMessage.info('已取消评价')
+  } catch (e) {
+    ElMessage.error(`反馈失败：${(e as Error).message}`)
+  }
 }
 
 async function handleEmptySend() {
   const text = emptyInputText.value.trim()
   if (!text) return
-  if (!chatStore.currentSession) {
-    chatStore.createSession()
-  }
   inputText.value = text
   emptyInputText.value = ''
   await handleSend()
 }
 
 async function handleQuickStart(text: string) {
-  if (!chatStore.currentSession) {
-    chatStore.createSession()
-  }
+  // 单会话模型下不需要手动创建 —— loadInitialHistory() 已经保证 currentSessionId 存在
   inputText.value = text
   await handleSend()
 }
@@ -986,6 +1414,24 @@ async function scrollToBottom() {
   })
 }
 
+/**
+ * 滚到顶部(handleDatePick 进入跨天滚动模式时用):
+ * 让 anchorDate 当天最早一条消息对齐视口顶部,用户从最早一条开始浏览,
+ * 之后上滑/下滑均由 onMessagesScroll 自然衔接跨天加载。
+ */
+async function scrollToTop() {
+  await nextTick()
+  if (messagesArea.value) {
+    messagesArea.value.scrollTop = 0
+  }
+  // 二次补偿:图片/异步布局完成后再次设 0,避免初始 layout 后滚走
+  requestAnimationFrame(() => {
+    if (messagesArea.value) {
+      messagesArea.value.scrollTop = 0
+    }
+  })
+}
+
 /* ---- useChatStream 封装：把 SSE 帧映射到本地状态 + store ---- */
 const { start: startStream, cancel: cancelStream } = useChatStream()
 
@@ -993,30 +1439,24 @@ async function handleSend() {
   const text = inputText.value.trim()
   if (!text || chatStore.isStreaming) return
 
-  let localSessionId = chatStore.currentSessionId
-  if (!localSessionId) {
-    localSessionId = chatStore.defaultSessionId
-    if (localSessionId && !chatStore.sessions.find((s) => s.id === localSessionId)) {
-      const defaultSession: ChatSession = {
-        id: localSessionId,
-        title: '默认对话',
-        messages: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      }
-      chatStore.sessions.unshift(defaultSession)
-      chatStore.currentSessionId = localSessionId
+  // 单会话模型下,localSessionId 直接由 (user, role) 确定性算出(必存在)。
+  // 后端 biz/chat_sessions.session_id_for 用相同算法 → chat_messages 写到对应 (user, role) 行。
+  const sid = localSessionId.value
+  let session = chatStore.sessions.find((s) => s.id === sid)
+  if (!session) {
+    // 兜底:loadInitialHistory() 没跑过(理论上不会发生,但保证发送链路不挂)
+    session = {
+      id: sid,
+      title: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [],
+      msgCount: 0,
+      loadedCount: 0,
     }
+    chatStore.sessions.unshift(session)
   }
-  if (!localSessionId) {
-    ElMessage.warning('会话初始化中，请稍后重试')
-    return
-  }
-
-  // 后端会话隔离必须用「聊天会话级 ID」(localSessionId, nanoid)，
-  // 不能用 chatStore.sessionId（登录 token）：否则同一登录下的所有聊天会话
-  // 在后端共用同一个 session_id，多轮历史(recent_messages)跨会话串线。
-  const wireSessionId = localSessionId
+  // (单会话模型下,不需要再写 currentSessionId —— sessions[0] 就是当前)
 
   if (isListening.value) {
     shouldResumeListening.value = true
@@ -1029,17 +1469,12 @@ async function handleSend() {
   presenceText.value = ''
   const source = pendingSource.value
   pendingSource.value = 'text'
-  chatStore.addMessage(localSessionId, { role: 'user', content: text, source })
+  chatStore.addMessage(sid, { role: 'user', content: text, source })
   await scrollToBottom()
 
   chatStore.isStreaming = true
-  const assistantMsg = chatStore.addMessage(localSessionId, { role: 'assistant', content: '' })
+  const assistantMsg = chatStore.addMessage(sid, { role: 'assistant', content: '' })
 
-  const session = chatStore.sessions.find((s) => s.id === localSessionId)
-  if (!session) {
-    chatStore.isStreaming = false
-    return
-  }
   const lastMsg = session.messages[session.messages.length - 1]
   lastMsg.content = ''
 
@@ -1054,19 +1489,17 @@ async function handleSend() {
     streamingReasoningText.value += chunk
   })
 
-  // 业界 messages[] 协议：只发当前输入，多轮历史由 echo-ai 按 sessionId 从
-  // chat_messages 加载（服务端状态）；不再把全部历史拼成 message 撞 4096 上限。
-  // message 字段同时透传当前输入，兼容尚未升级的后端实例。
-  const currentUserText = text.trim()
+  // 业界 messages[] 协议：只发当前输入,多轮历史由 echo-ai 按 sessionId 从
+  // chat_messages 加载(服务端状态);不再把全部历史拼成 message 撞 4096 上限。
 
   startStream(
     {
       model: chatStore.selectedModel,
       userId: chatStore.userId,
-      sessionId: wireSessionId,
+      sessionId: sid,
       roleId: rolesStore.currentRoleId || 'default',
-      message: currentUserText,
-      messages: [{ role: 'user', content: currentUserText }],
+      message: text,
+      messages: [{ role: 'user', content: text }],
     },
     {
       onChunk: (chunk) => {
@@ -1078,29 +1511,29 @@ async function handleSend() {
         presenceText.value = content
       },
       onContext: (info) => {
-        chatStore.appendMessageContext(localSessionId, info)
+        chatStore.appendMessageContext(sid, info)
       },
       onTool: (toolCall) => {
-        chatStore.appendMessageToolCalls(localSessionId, [toolCall])
+        chatStore.appendMessageToolCalls(sid, [toolCall])
       },
       onResource: async (resource) => {
-        chatStore.appendMessageResource(localSessionId, resource)
+        chatStore.appendMessageResource(sid, resource)
         await scrollToBottom()
       },
       onMemory: (result) => {
-        chatStore.appendMessageMemoryResult(localSessionId, result)
+        chatStore.appendMessageMemoryResult(sid, result)
         if (result.ok) ElMessage.success('已提取长期记忆')
         else ElMessage.warning(`长期记忆提取失败${result.error ? `：${result.error}` : ''}`)
       },
       onThinking: (ev) => {
-        chatStore.appendMessageThinking(localSessionId, ev)
+        chatStore.appendMessageThinking(sid, ev)
         if (ev.stage === 'model_reasoning') {
           pushReasoning(ev.text)
         }
         scrollToBottom()
       },
       onRecall: (info) => {
-        chatStore.appendMessageMemoryRecall(localSessionId, info)
+        chatStore.appendMessageMemoryRecall(sid, info)
         scrollToBottom()
       },
       onMoodUpdate: (m) => {
@@ -1117,6 +1550,7 @@ async function handleSend() {
         chatStore.isStreaming = false
         // 输出完成：冲刷剩余内容 + 操作栏/面板收起会改变高度，必须再滚一次到底部
         scrollToBottom()
+        // 单会话模型下没有 listExhausted / refreshCurrentSessionInList 这类副作用要清理
         const shouldSpeak =
           (autoPlay.value || (chatMode.value === 'pixel' && pixelAutoListen.value)) &&
           lastMsg &&
@@ -1165,10 +1599,9 @@ async function handleCopy(content: string) {
 }
 
 async function handleRetry(msg: Message) {
-  const sessionId = chatStore.currentSessionId
-  if (!sessionId || chatStore.isStreaming) return
+  if (chatStore.isStreaming) return
 
-  const session = chatStore.sessions.find((s) => s.id === sessionId)
+  const session = chatStore.sessions.find((s) => s.id === localSessionId.value)
   if (!session) return
 
   pendingSource.value = msg.source ?? 'text'
@@ -1185,10 +1618,7 @@ async function handleSaveEdit(msgId: string) {
   const newContent = editingText.value.trim()
   if (!newContent) return
 
-  const sessionId = chatStore.currentSessionId
-  if (!sessionId) return
-
-  const session = chatStore.sessions.find((s) => s.id === sessionId)
+  const session = chatStore.sessions.find((s) => s.id === localSessionId.value)
   if (!session) return
 
   const msgIndex = session.messages.findIndex((m) => m.id === msgId)
@@ -1214,13 +1644,6 @@ function handleCancelEdit() {
   editingMessageId.value = null
   editingText.value = ''
 }
-
-watch(
-  () => chatStore.currentSessionId,
-  async () => {
-    await scrollToBottom()
-  },
-)
 
 // 流式结束（成功/失败/手动停止）后，等 DOM 渲染稳定再滚一次到底部，
 // 覆盖操作栏出现、面板收起、图片加载等「完成时」的异步高度变化。
@@ -1253,6 +1676,39 @@ function formatTime(ts: number): string {
   const d = new Date(ts)
   const pad = (n: number) => n.toString().padStart(2, '0')
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/**
+ * 消息气泡下方时间戳的智能格式:
+ *   - 今天       → HH:MM
+ *   - 本年内     → MM-DD HH:MM
+ *   - 跨年/更早  → YYYY-MM-DD HH:MM
+ * 无效时间戳(0 / NaN)返回空串,模板里就能直接靠 v-if 控制隐藏。
+ */
+function formatMessageTime(ts: number): string {
+  if (!ts || !Number.isFinite(ts)) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  if (sameDay) return hm
+  const md = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  if (d.getFullYear() === now.getFullYear()) return `${md} ${hm}`
+  return `${d.getFullYear()}-${md} ${hm}`
+}
+
+/** hover 提示用的完整时间(YYYY-MM-DD HH:MM),与 formatMessageTime 同源 */
+function formatMessageTimeFull(ts: number): string {
+  if (!ts || !Number.isFinite(ts)) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /** 历史对话列表（派生自当前会话的消息） */
@@ -1290,19 +1746,7 @@ watch(
   { immediate: true },
 )
 
-function handleSwitchMode(mode: ChatMode) {
-  if (chatMode.value === mode) return
-  chatMode.value = mode
-  try {
-    localStorage.setItem(CHAT_MODE_KEY, mode)
-  } catch {
-    /* ignore */
-  }
-  console.info('[chat] switch mode -> %s', mode)
-  if (mode === 'text') {
-    stopPixelAutoListen()
-  }
-}
+// (handleSwitchMode 已删除 —— 模板里没有按钮引用它)
 
 function startPixelAutoListen() {
   if (!speech.isSupported.value) {
@@ -1419,6 +1863,10 @@ onBeforeUnmount(() => {
   stopPixelAutoListen()
   tts.stop()
   if (isListening.value) speech.stop()
+  if (historyObserver) {
+    historyObserver.disconnect()
+    historyObserver = null
+  }
 })
 
 watch(
@@ -1608,6 +2056,109 @@ const placeholderHint = computed(() => {
   padding: 0.5rem;
 }
 
+/* 关键字筛选输入框 */
+.session-filter {
+  padding: 0.35rem 0.5rem 0.5rem;
+}
+.session-filter :deep(.el-input__wrapper) {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  border-radius: 0.5rem;
+}
+.session-filter :deep(.el-input__inner) {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.78rem;
+}
+.session-filter :deep(.el-input__inner::placeholder) {
+  color: rgba(255, 255, 255, 0.3);
+}
+.session-filter :deep(.el-input__prefix-inner) {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* 触底哨兵 */
+.session-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 0;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.3);
+}
+.session-sentinel__loading::before {
+  content: '';
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(91, 141, 239, 0.85);
+  margin-right: 0.4rem;
+  animation: spin 0.9s linear infinite;
+  vertical-align: middle;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 重命名按钮：hover 才显示，与删除按钮同组 */
+.session-edit {
+  width: clamp(1.2rem, 1.5vw, 1.5rem);
+  height: clamp(1.2rem, 1.5vw, 1.5rem);
+  border-radius: 0.4rem;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  opacity: 0;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.session-item:hover .session-edit {
+  opacity: 1;
+}
+.session-edit:hover {
+  background: rgba(91, 141, 239, 0.2);
+  color: #5b8def;
+}
+
+/* 重命名弹层 */
+.session-rename-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.session-rename-dialog {
+  width: 80%;
+  max-width: 18rem;
+  background: #1f1f29;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.6rem;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  box-shadow: 0 0.5rem 2rem rgba(0, 0, 0, 0.4);
+}
+.session-rename-dialog__title {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+}
+.session-rename-dialog__actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .session-item {
   display: flex;
   align-items: center;
@@ -1633,17 +2184,39 @@ const placeholderHint = computed(() => {
   flex-shrink: 0;
 }
 
-.session-title {
+.session-meta {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.session-title {
   font-size: clamp(0.8rem, 1vw, 0.95rem);
   color: rgba(255, 255, 255, 0.75);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.2;
 }
 
 .session-item--active .session-title {
   color: #fff;
+}
+
+/* lastMsgAt 相对时间：紧贴标题下方，灰色小字 */
+.session-time {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-item--active .session-time {
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .session-delete {
@@ -1924,9 +2497,226 @@ const placeholderHint = computed(() => {
   padding: clamp(0.85rem, 1.8vw, 1.5rem) 0;
 }
 
+/* ====== 历史浏览工具栏：仅留「历史」按钮入口(筛选 UI 已下线) ====== */
+.messages-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: clamp(0.5rem, 1vw, 0.75rem) clamp(0.85rem, 1.8vw, 1.5rem);
+  background: rgba(255, 255, 255, 0.025);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+/* 历史日历按钮(暗色辅助操作,左对齐 messages-toolbar 即可) */
+.history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 1.85rem;
+  padding: 0 0.85rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.history-btn .el-icon {
+  font-size: 0.92rem;
+}
+.history-btn:hover:not(.history-btn--active) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(91, 141, 239, 0.4);
+  color: #fff;
+}
+.history-btn--active {
+  background: rgba(22, 93, 255, 0.18);
+  border-color: rgba(22, 93, 255, 0.55);
+  color: #fff;
+  box-shadow: 0 0.2rem 0.55rem rgba(22, 93, 255, 0.18);
+}
+
+/* 历史日历弹窗 —— 沿用暗色主题,贴合 messages-toolbar 配色 */
+.history-calendar {
+  padding: 0.25rem;
+}
+/* popover 容器深色覆写(直接挂在 popper 上,需要 !important 压过 el 默认主题) */
+:global(.history-calendar-popover) {
+  background: #2a2a2a !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.45) !important;
+  color: #fff;
+}
+.history-calendar :deep(.el-calendar) {
+  --el-calendar-cell-width: 36px;
+  --el-calendar-header-padding: 0.3rem 0.4rem;
+}
+.history-calendar :deep(.el-calendar__header) {
+  color: rgba(255, 255, 255, 0.85);
+  padding: 0.25rem 0.4rem;
+}
+.history-calendar :deep(.el-calendar__title) {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.85rem;
+}
+.history-calendar :deep(.el-calendar__button-group .el-button) {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.72rem;
+  padding: 2px 8px;
+}
+.history-calendar :deep(.el-calendar__button-group .el-button.is-active),
+.history-calendar :deep(.el-calendar__button-group .el-button:hover) {
+  color: #fff;
+  background: rgba(22, 93, 255, 0.22);
+  border-color: rgba(22, 93, 255, 0.5);
+}
+.history-calendar :deep(.el-calendar__arrow-btn),
+.history-calendar :deep(.el-calendar__arrow-btn:hover) {
+  color: rgba(255, 255, 255, 0.7);
+}
+.history-calendar :deep(.el-calendar-table) {
+  color: rgba(255, 255, 255, 0.7);
+}
+.history-calendar :deep(.el-calendar-day) {
+  padding: 0;
+  height: 36px;
+}
+.history-calendar :deep(.el-calendar-day:hover) {
+  background: rgba(255, 255, 255, 0.05);
+}
+.history-calendar :deep(.el-calendar-day.is-selected),
+.history-calendar :deep(.el-calendar-day.is-today) {
+  background: rgba(22, 93, 255, 0.18);
+  color: #fff;
+}
+.history-calendar__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  box-sizing: border-box;
+  padding: 2px 0;
+}
+.history-calendar__cell--has {
+  cursor: pointer;
+}
+.history-calendar__day {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+.history-calendar__cell--has .history-calendar__day {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+}
+.history-calendar__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #00b96b;
+  box-shadow: 0 0 4px rgba(0, 185, 107, 0.55);
+}
+.history-calendar__dot--inline {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.history-calendar__legend,
+.history-calendar__hint {
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.history-calendar__hint {
+  margin-top: 0.25rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* 滚动触顶哨兵 */
+.history-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 0;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.02em;
+  user-select: none;
+  /* 在消息列表最顶部留出空间,避免「上滑加载」文字挤压首条消息 */
+  min-height: 2.1rem;
+}
+.history-sentinel--exhausted {
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+}
+.history-sentinel__loading::before {
+  content: '';
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(91, 141, 239, 0.85);
+  margin-right: 0.4rem;
+  animation: spin 0.9s linear infinite;
+  vertical-align: middle;
+}
+.history-sentinel__hint {
+  cursor: default;
+}
+.history-sentinel--hint .history-sentinel__hint:hover {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 滚动触底哨兵(双向滚动模式用) —— 风格对齐 .history-sentinel */
+.history-newer-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 0;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.02em;
+  user-select: none;
+  min-height: 2.1rem;
+}
+.history-newer-sentinel--exhausted {
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+}
+.history-newer-sentinel__loading::before {
+  content: '';
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(91, 141, 239, 0.85);
+  margin-right: 0.4rem;
+  animation: spin 0.9s linear infinite;
+  vertical-align: middle;
+}
+
 .messages-inner {
-  max-width: 55rem;
-  margin: 0 auto;
+  /* 不限制宽度,跟着 .messages-area (.chat-main flex:1) 撑满。
+   * 历史对话的胶囊宽度 = chat 对话框的可视宽度,跟着变。 */
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: clamp(0.85rem, 1.8vw, 1.5rem);
@@ -1980,23 +2770,82 @@ const placeholderHint = computed(() => {
 }
 
 .message-bubble {
-  max-width: 70%;
+  max-width: 90%;
   padding: clamp(0.6rem, 1.1vw, 0.9rem) clamp(0.85rem, 1.3vw, 1.15rem);
   border-radius: clamp(0.6rem, 1.2vw, 1rem);
   font-size: clamp(0.8rem, 1.05vw, 0.95rem);
   line-height: 1.7;
 }
 
+/* 用户气泡:按内容收缩 —— 短消息气泡贴合内容宽度,
+ * 不提前折行、不留出一大片蓝底空白;长消息由 max-width: 90% 兜底后按容器宽度换行。 */
 .message-bubble--user {
+  width: fit-content;
   background: #165dff;
   color: #fff;
   border-bottom-right-radius: 0.25rem;
 }
 
+/*
+ * AI 气泡:撑满可用宽度 —— 让长内容按容器宽度整体换行(段落式)。
+ * 千万不要用 width: fit-content:LLM 输出里句间的 \n 会被 ChatMarkdown
+ * 渲染成 <br>,fit-content 会把气泡缩到「最长一行」的宽度,视觉上变成
+ * 「又窄又细、每句一行」,而不是正常的段落式回答。
+ */
 .message-bubble--assistant {
+  width: 100%;
+  max-width: 100%;
   background: #2a2a2a;
   color: rgba(255, 255, 255, 0.9);
   border-bottom-left-radius: 0.25rem;
+}
+
+/*
+ * 用户消息气泡的文本渲染规则 —— 与输入框 <el-textarea> 保持一致:
+ *  - white-space: pre-wrap  → 保留用户主动按下的 \n(多行输入),不折叠为单行
+ *  - overflow-wrap: break-word → 仅当一段内容超过 max-width 时才在字间断行,避免溢出
+ * 保证输入框、用户气泡、AI 回复气泡三者的换行逻辑统一为"按段落换行 + 自然宽度换行"。
+ */
+.message-content {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/*
+ * bubble-col 把 bubble + 时间戳纵向堆叠,并控制横向对齐:
+ *   - assistant: 左对齐(bubble 贴左、时间戳也贴左)
+ *   - user:      右对齐(bubble 贴右、时间戳也贴右)
+ * flex: 1 必须保留 —— 让 col 拿到确定宽度。否则作为「宽度不确定的 column flex 子项」,
+ * 气泡的 width 会解析错误:短消息被提前折行、右侧留白,AI 气泡被缩到最长一行宽(又窄又细)。
+ * max-width 90% 留 10% 给对侧留白避免气泡贴满全行。
+ */
+.message-bubble-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  align-items: flex-start;
+  max-width: 90%;
+  min-width: 0;
+}
+
+.message-bubble-col--user {
+  align-items: flex-end;
+}
+
+/* 消息时间戳:bubble 下方一行小字,默认低对比度避免抢戏,hover 行时略亮 */
+.message-time {
+  margin-top: 0.28rem;
+  font-size: clamp(0.65rem, 0.85vw, 0.75rem);
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.38);
+  padding: 0 clamp(0.4rem, 0.7vw, 0.55rem);
+  white-space: nowrap;
+  user-select: none;
+  letter-spacing: 0.01em;
+}
+
+.message-wrapper:hover .message-time {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .message-actions {
@@ -2170,8 +3019,8 @@ const placeholderHint = computed(() => {
 }
 
 .input-wrapper {
-  max-width: 55rem;
-  margin: 0 auto;
+  /* 同 .messages-inner:跟着 .input-area 撑满,不在 55rem 处卡住。 */
+  width: 100%;
   display: flex;
   align-items: flex-end;
   gap: 0.75rem;
@@ -2309,7 +3158,7 @@ const placeholderHint = computed(() => {
 
 /* 输入框左下角：录音中提示 */
 .recording-hint {
-  max-width: 55rem;
+  width: 100%;
   margin: 0.4rem auto 0;
   display: flex;
   align-items: center;

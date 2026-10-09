@@ -13,6 +13,11 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '首页' },
   },
   {
+    // 兼容历史 URL：旧版 router 把 /chat 当作根路径，这里收敛到 /admin/chat
+    path: '/chat',
+    redirect: '/admin/chat',
+  },
+  {
     path: '/register',
     name: 'Register',
     component: () => import('@/views/auth/RegisterPage.vue'),
@@ -24,10 +29,10 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
-        redirect: '/chat',
+        redirect: '/admin/chat',
       },
       {
-        path: '/chat',
+        path: 'chat',
         name: 'Chat',
         component: () => import('@/views/chat/ChatPage.vue'),
         meta: { title: '智能对话', fullBleed: true },

@@ -199,6 +199,12 @@ export interface Message {
   /** 回忆检索命中详情（event=memory_recall 累积） */
   memoryRecall?: ChatMemoryRecall
   /**
+   * 长期记忆抽取结果（event=memory_extracted）：累积到 message.memoryResult，
+   * 由 MemoryExtractPanel 渲染为「长期记忆抽取」子面板。
+   * 流式响应（stream=true）可能不出现（仅 stream=false 时由后端补发）；
+   * 历史消息从后端 trace.memoryResult 映射回来。 */
+  memoryResult?: ChatMemoryResult
+  /**
    * 阶段状态机（v2 协议）。
    * 由 SSE `stage` 事件累加得到,用于 StageProgress 组件展示五阶段进展。
    * key 为 StageName,value 为该阶段的最新 StageState。
@@ -206,7 +212,26 @@ export interface Message {
   stageState?: Record<StageName, StageState>
   /** 消息来源：text = 键盘输入，voice = 语音识别；默认 text */
   source?: 'text' | 'voice'
+  /**
+   * 用户对 assistant 消息的反馈：1=赞 / -1=踩 / 0=取消 / null=未评价。
+   * 前端乐观更新（点击立刻变），后台 submitFeedback 失败再回滚。
+   */
+  rating?: number | null
   createdAt: number
+}
+
+/**
+ * 每轮 assistant 消息的阶段明细（后端 chat_messages.trace 落库 → list_messages 返回）。
+ *
+ * 历史消息不走 SSE，思考 / 工具调用 / 回忆命中 / 上下文注入这些明细由后端
+ * 随消息一起落库；前端加载历史时映射回 Message，让「胶囊」popover 也能展示
+ * 该轮的工具与记忆调用情况（老消息没有 trace → 回落到占位提示）。
+ */
+export interface ChatMessageTrace {
+  thinkings?: ChatThinkingEvent[]
+  toolCalls?: ChatToolCall[]
+  memoryRecall?: ChatMemoryRecall
+  context?: ChatContextInfo
 }
 
 export interface ChatSession {
@@ -215,6 +240,17 @@ export interface ChatSession {
   messages: Message[]
   createdAt: number
   updatedAt: number
+  /**
+   * 服务端消息计数（来自 sessions 表 msg_count 字段）。
+   * 0 表示本地新建但尚未同步；>0 表示后端已落库。
+   * 用它判断侧栏是否要补拉消息（避免给后端徒增查询）。
+   */
+  msgCount?: number
+  /**
+   * 服务端消息已加载条数（前端 messages.length）。
+   * 用作「按需补齐」标记：=msgCount 时下次切换会话不必再拉。
+   */
+  loadedCount?: number
 }
 
 export interface ChatRequest {

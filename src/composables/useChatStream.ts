@@ -1,6 +1,7 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { sendChatMessageStream } from '@/api/chat'
-import type { ChatRequest, SendChatStreamOptions } from '@/api/chat'
+import type { SendChatStreamOptions } from '@/api/chat'
+import type { ChatRequest } from '@/types/chat'
 import { useChatStore } from '@/stores/chat'
 
 /**

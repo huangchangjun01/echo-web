@@ -370,7 +370,7 @@ export function parseRelationChange(raw: unknown): RelationChange | null {
 }
 
 /** @deprecated 历史事件，前端不再处理。保留解析以兼容旧后端。 */
-export function parsePrefix(raw: unknown): string | null {
+export function parsePrefix(_raw: unknown): string | null {
   return null
 }
 
@@ -427,6 +427,13 @@ export function sendChatMessage(payload: ChatRequest): Promise<ChatResponse> {
  * 任一 callback 缺省（undefined）都不会被调用，不抛错。
  */
 export interface SendChatStreamOptions {
+  /**
+   * 可选外部 AbortSignal。
+   * 提供时，fetch 会改用此 signal（同时让 `AbortError` 正常触发 `onError` 分支），
+   * 这样调用方持有的 controller 就能真正控制这个请求。
+   * 缺省时仍由本函数自建 controller 并通过返回值暴露给调用方。
+   */
+  signal?: AbortSignal
   onChunk?: (chunk: string) => void
   onPrefix?: (content: string) => void
   onPresence?: (content: string) => void
@@ -457,6 +464,10 @@ export function sendChatMessageStream(
   const url = `${baseURL}/chat`
   const body = JSON.stringify({ ...payload, stream: true })
 
+  // 优先使用调用方传入的 signal，这样调用方持有的 controller 就能真正中止本次 fetch。
+  // 缺省时用我们自建的，由返回值 controller 暴露给调用方。
+  const fetchSignal = options.signal ?? controller.signal
+
   console.info(
     '[sse] → POST %s, sessionId=%s (该值应等于后端 /api/auth/login 返回的 sessionId)',
     url,
@@ -478,7 +489,7 @@ export function sendChatMessageStream(
     method: 'POST',
     headers,
     body,
-    signal: controller.signal,
+    signal: fetchSignal,
   })
     .then(async (response) => {
       if (!response.ok) {

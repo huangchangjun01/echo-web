@@ -11,14 +11,18 @@
  *  - currentRoleId 仅在角色列表加载完成后才允许被业务模块读取；
  *    bootstrap() 内部串联拉取和回放切换，保证初始化时序可控。
  *  - 切换角色仅修改 ref，不重新拉取列表（避免列表闪烁）；列表与各业务模块自取。
- *  - 当前用户登出时由调用方清空（避免脏数据），本 store 不自动监听 authStore。
+ *  - 账号身份变化（登录 / 登出 / 会话过期）时自动清空并为新身份重新拉取：
+ *    角色是「按用户」隔离的数据，沿用上一个身份（尤其是匿名态）的 currentRoleId
+ *    会让 (user, role) 算出的会话哈希对不上，表现为"登录后进入智能对话页空白、
+ *    刷新才恢复"（历史 bug 的根因）。
  */
 
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as rolesApi from '@/api/roles'
 import type { CreateRoleRequest, Role, UpdateRoleRequest } from '@/types/role'
+import { useAuthStore } from '@/stores/auth'
 
 const STORAGE_KEY = 'echo_current_role_id'
 
@@ -79,10 +83,12 @@ export const useRolesStore = defineStore('roles', () => {
           setCurrentRoleId(String(first.id))
         }
       }
+      // 只有真正拉取成功才算"已就绪"——失败时保持 false，
+      // 让 AdminLayout 等页面在下一次挂载时重试（历史 bug：失败也置 true → 永不重试）
+      bootstrapped.value = true
       return list
     } finally {
       loading.value = false
-      bootstrapped.value = true
     }
   }
 
@@ -129,6 +135,35 @@ export const useRolesStore = defineStore('roles', () => {
     setCurrentRoleId('')
     bootstrapped.value = false
   }
+
+  /**
+   * 账号身份变化（登录 / 登出 / 会话过期）时，角色状态必须跟着换。
+   *
+   * 角色数据按用户隔离：沿用上一个身份（常见是匿名态）的 currentRoleId，
+   * 会让聊天页按 (user, role) 算出的会话哈希命中一个不存在的会话，
+   * 表现为"登录后进入【智能对话】页面空白，手动刷新才显示历史"。
+   *
+   * flush: 'sync' —— 保证清空发生在路由跳转 / 页面挂载之前，
+   * AdminLayout 的 onMounted 才能看到 bootstrapped=false 并重新拉取。
+   * 不做 immediate：页面启动时 authStore 已从 localStorage 恢复身份，
+   * 此时应直接复用持久化的 currentRoleId（避免每次刷新都闪一次空角色）。
+   */
+  const authStore = useAuthStore()
+  watch(
+    () => authStore.currentUser?.id ?? null,
+    (uid, prev) => {
+      if (uid === prev) return
+      clear()
+      // 已登录（如刚登录成功）→ 立即为新账号拉取角色列表，
+      // 不依赖 AdminLayout 的挂载时序；失败时保持未就绪，后续页面挂载会重试。
+      if (authStore.isAuthenticated) {
+        void fetchRoles().catch(() => {
+          /* 拉取失败：bootstrapped 保持 false，交给后续挂载的页面重试 */
+        })
+      }
+    },
+    { flush: 'sync' },
+  )
 
   return {
     roles,

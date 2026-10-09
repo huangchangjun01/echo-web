@@ -73,12 +73,16 @@ const rolesStore = useRolesStore()
 
 const loginDialogVisible = ref(false)
 
+/** 登录成功后要去往的目标路径。null 表示不强制跳转，让用户重新点卡片。 */
+const pendingTarget = ref<string | null>(null)
+
 const remainingMinutes = computed(() => {
   return Math.max(1, Math.floor(authStore.remainingMs / 60000))
 })
 
 function goToChat() {
   if (!authStore.isAuthenticated) {
+    pendingTarget.value = '/chat'
     loginDialogVisible.value = true
     return
   }
@@ -87,6 +91,7 @@ function goToChat() {
 
 function goToFile() {
   if (!authStore.isAuthenticated) {
+    pendingTarget.value = '/admin/upload'
     loginDialogVisible.value = true
     return
   }
@@ -94,7 +99,11 @@ function goToFile() {
 }
 
 function onLoginSuccess() {
-  // 登录成功后的额外处理：这里仅占位，业务跳转由用户点击卡片触发
+  // 登录前用户点击了哪张卡片（智能对话 / 记忆管理），登录成功就自动跳过去，
+  // 避免「登录成功 → 还要再点一次」的体验断点。
+  const target = pendingTarget.value
+  pendingTarget.value = null
+  if (target) router.push(target)
 }
 
 async function handleLogout() {

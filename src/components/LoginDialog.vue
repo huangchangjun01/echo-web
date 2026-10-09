@@ -39,6 +39,7 @@
           :prefix-icon="User"
           autocomplete="username"
           :disabled="submitting"
+          :input-style="inputStyle"
         />
       </el-form-item>
 
@@ -51,6 +52,7 @@
           :prefix-icon="Lock"
           autocomplete="current-password"
           :disabled="submitting"
+          :input-style="inputStyle"
           @keyup.enter="handleLogin"
         />
       </el-form-item>
@@ -84,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
@@ -112,6 +114,18 @@ const form = reactive({
   username: '',
   password: '',
 })
+
+/**
+ * inputStyle 通过 el-input 的 :input-style 直接写入到原生 <input> 的内联 style，
+ * 强制覆盖 disabled / autofill 各种状态下的字色，避免被 element-plus 默认主题
+ * 或 Chrome autofill 默认色覆盖。backgroundColor 透明让输入框保留我们自定义的
+ * wrapper 背景（rgba 透明度）。 */
+const inputStyle = computed(() => ({
+  color: '#c0c4cc',
+  backgroundColor: 'transparent',
+  WebkitTextFillColor: '#c0c4cc',
+  caretColor: '#c0c4cc',
+}))
 
 const rules: FormRules = {
   username: [
@@ -225,6 +239,30 @@ function goRegister() {
   color: #fff;
   font-size: clamp(0.85rem, 1.05vw, 0.95rem);
   height: clamp(2rem, 2.6vw, 2.4rem);
+}
+/* 通过 element-plus CSS 变量覆盖 disabled 文字色（推荐方式，跨选择器稳定生效），
+ * 同时用 :deep(:disabled) 直接命中原生 input 元素，覆盖 Chrome 自动填充态。 */
+
+.login-form :deep(.el-input__inner:disabled) {
+  color: #c0c4cc !important;
+  -webkit-text-fill-color: #c0c4cc !important;
+}
+.login-form :deep(input:-webkit-autofill:disabled),
+.login-form :deep(input:-internal-autofill-selected:disabled) {
+  -webkit-text-fill-color: #c0c4cc !important;
+  color: #c0c4cc !important;
+}
+.login-form :deep(input:-webkit-autofill),
+.login-form :deep(input:-webkit-autofill:hover),
+.login-form :deep(input:-webkit-autofill:focus),
+.login-form :deep(input:-internal-autofill-selected) {
+  -webkit-text-fill-color: #c0c4cc !important;
+  caret-color: #c0c4cc !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+.login-form :deep(.el-input.is-disabled .el-input__inner) {
+  color: #c0c4cc !important;
+  -webkit-text-fill-color: #c0c4cc !important;
 }
 
 .login-form :deep(.el-input__inner::placeholder) {

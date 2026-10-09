@@ -19,6 +19,7 @@ import { DEFAULT_STAGE_STATE } from '@/stores/chat'
 import StageProgress from './StageProgress.vue'
 import ThoughtPanel from './ThoughtPanel.vue'
 import ToolCallsPanel from './ToolCallsPanel.vue'
+import MemoryExtractPanel from './MemoryExtractPanel.vue'
 import ResourcesPanel from './ResourcesPanel.vue'
 import MessageActions from './MessageActions.vue'
 import ChatMarkdown from './ChatMarkdown.vue'
@@ -30,16 +31,16 @@ const props = defineProps<{
   streamingReasoning?: string
 }>()
 
-const hasAnyPanel = computed(() =>
-  (props.message.thinkings?.length ?? 0) > 0
-  || (props.message.toolCalls?.length ?? 0) > 0
-  || (props.message.attachments?.length ?? 0) > 0,
-)
+/** 转发事件：把 MessageActions 的反馈（up/down/none）冒泡给父组件，
+ *  父组件 ChatPage 会调 chatStore.rateMessage 走 API。
+ *  复制 / TTS 暂不冒泡（页面已经各自有 handler）。 */
+defineEmits<{
+  (e: 'feedback', value: 'up' | 'down' | 'none'): void
+}>()
 
 /**
  * 任意阶段被触发过(running / done / skipped)即为 true。
- * 用于让 StageProgress 在流式结束后仍能保留阶段历史,
- * 而不是仅靠 isStreaming || hasAnyPanel 兜底（后两个都为空时会消失）。
+ * 用于让 StageProgress 在流式结束后仍能保留阶段历史。
  */
 const hasAnyStageActivity = computed(() =>
   Object.values(props.message.stageState ?? {}).some(s => s !== 'idle'),
@@ -70,12 +71,17 @@ const hasAnyStageActivity = computed(() =>
       :tool-calls="message.toolCalls"
       :default-open="isStreaming"
     />
+    <MemoryExtractPanel
+      v-if="message.memoryResult"
+      :memory-result="message.memoryResult"
+      :default-open="isStreaming"
+    />
     <ResourcesPanel
       v-if="message.attachments?.length"
       :resources="message.attachments"
       :default-open="isStreaming"
     />
-    <MessageActions v-if="!isStreaming" :message="message" />
+    <MessageActions v-if="!isStreaming" :message="message" @feedback="(v: 'up' | 'down' | 'none') => $emit('feedback', v)" />
   </div>
 </template>
 
@@ -89,6 +95,16 @@ const hasAnyStageActivity = computed(() =>
   line-height: 1.6;
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 12px rgba(255, 138, 102, 0.08);
-  max-width: 720px;
+  /*
+   * 用百分比而不是固定 720px,让 AI 回复气泡随窗口大小等比例缩放,
+   * 与 .message-bubble 的 90% max-width 保持一致。
+   * 99% 而不是 100% 是为了避免 inline-flex 子项被父容器宽度挤掉换行。
+   *
+   * 不要用 width: fit-content —— LLM 输出的句间 \n 会被 ChatMarkdown
+   * 渲染成 <br>,fit-content 会把气泡缩到「最长一行」的宽度,
+   * 视觉上变成「窄而细、每句一行」,而不是用户记忆里「段落式」的回答。
+   * 这里让气泡默认 width: auto 撑到 max-width,长内容就自然按容器宽度换行。
+   */
+  max-width: 99%;
 }
 </style>

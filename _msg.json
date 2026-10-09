@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "content": "怎么调试Python的内存泄漏？",
+      "createdAt": "2026-09-22 09:33:45",
+      "role": "user"
+    },
+    {
+      "content": "调试 Python 内存泄漏的常用方法，按推荐顺序给你列一下：\n\n## 1. 先观察：确认是否真的在泄漏\n\n```python\nimport psutil, os\ndef mem_mb():\n    return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024\n\nprint(mem_mb())  # 在不同操作前后打印，看 RSS 是否持续增长\n```\n\n## 2. `tracemalloc`（内置，最常用）\n\n追踪分配位置，适合找\"哪行代码分配了最多内存\"：\n\n```python\nimport tracemalloc\ntracemalloc.start()\n# ... 跑你的代码 ...\nsnapshot = tracemalloc.take_snapshot()\nfor stat in snapshot.statistics(\"lineno\")[:10]:\n    print(stat)\n```\n\n## 3. `gc` 模块 —— 检查循环引用\n\n```python\nimport gc\ngc.collect()\nprint(gc.get_objects())          # 当前所有对象\nprint(gc.get_referrers(obj))     # 谁在引用这个对象（找泄漏根源）\n```\n\n## 4. `objgraph`（可视化对象关系）\n\n```bash\npip install objgraph\n```\n\n```python\nimport objgraph\nobjgraph.show_most_common_types()    # 哪种类型对象数量异常多\nobjgraph.show_backrefs(leaked_obj, filename='refs.png')  # 看引用链\n```\n\n## 5. `memory_profiler` —— 按行看内存\n\n```python\n@profile\ndef my_func():\n    ...\n```\n运行时加 `python -m memory_profiler script.py`，会显示每行内存增量。\n\n## 6. `pympler` —— 精细对象统计\n\n```python\nfrom pympler import tracker\ntr = tracker.SummaryTracker()\n# ... 操作 ...\ntr.print_diff()  # 显示新增了哪些对象、各自大小\n```\n\n## 7. 常见泄漏场景（自查清单）\n\n- 🔴 **全局变量 / 模块级 list/dict 不断 append**\n- 🔴 **闭包捕获了不该持有的对象**\n- 🔴 **循环引用**（尤其是自定义容器 + 回调/lambda）\n- 🔴 **未关闭的资源**：`file`、`socket`、`cursor`（用 `with`）\n- 🔴 **监听器/回调注册后没注销**（如信号、观察者模式）\n- 🔴 **`__del__` 里持有引用**（会阻止 GC 回收）\n\n## 调试套路总结\n\n| 阶段 | 工具 |\n|------|------|\n| 确认泄漏 | `psutil` 监控 RSS |\n| 定位分配点 | `tracemalloc` |\n| 找循环引用 | `gc.get_referrers` |\n| 看对象图 | `objgraph` |\n| 按行分析 | `memory_profiler` |\n| 长期监控 | `pympler` / `prometheus` |\n\n**经验之谈**：先用 `tracemalloc` 抓快照对比，80% 的泄漏能定位到；剩下的再用 `objgraph` 画引用链挖根源。如果想针对某个具体场景深挖，告诉我你的代码大概是什么样，我们一起看 💪",
+      "createdAt": "2026-09-22 09:33:45",
+      "role": "assistant"
+    }
+  ],
+  "ok": true
+}
