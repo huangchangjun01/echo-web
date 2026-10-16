@@ -146,13 +146,6 @@
                   </div>
                 </template>
               </el-calendar>
-              <div class="history-calendar__legend">
-                <span class="history-calendar__dot history-calendar__dot--inline" />
-                <span>表示当天有对话</span>
-              </div>
-              <div class="history-calendar__hint">
-                点击带绿点的日期，查看当天对话（可上下滑动跨天浏览）
-              </div>
             </div>
           </el-popover>
         </div>
@@ -228,63 +221,84 @@
                 时间戳跟 bubble 同一侧对齐,不会被 actions / avatar 推跑。
               -->
               <div class="message-bubble-col" :class="`message-bubble-col--${msg.role}`">
-                <div class="message-bubble" :class="`message-bubble--${msg.role}`">
-                  <div v-if="editingMessageId === msg.id" class="edit-wrapper">
-                    <el-input
-                      v-model="editingText"
-                      type="textarea"
-                      :rows="2"
-                      placeholder="修改内容"
-                      class="edit-input"
-                      @keydown.enter.exact.prevent="handleSaveEdit(msg.id)"
-                      @keydown.esc="handleCancelEdit"
-                    />
-                    <div class="edit-actions">
-                      <button class="edit-btn edit-btn--cancel" @click="handleCancelEdit">取消</button>
-                      <button class="edit-btn edit-btn--save" @click="handleSaveEdit(msg.id)">发送</button>
-                    </div>
+                <!--
+                  message-bubble-row:气泡所在的横排容器,把「复制 / 编辑 / 重试」操作栏
+                  与气泡收进同一行:操作栏在 DOM 中先于气泡,渲染在气泡左侧;
+                  整行由 justify-content: flex-end 贴右,气泡仍贴右、按钮紧跟其左。
+                  assistant 不渲染操作栏,容器用 display: contents 不生成盒子,
+                  不改变气泡在 col 内的宽度解析行为(见 chat-bubble-width 回归测试)。
+                -->
+                <div class="message-bubble-row" :class="`message-bubble-row--${msg.role}`">
+                  <!-- 操作栏:user 专属,渲染在气泡左侧;hover 整行消息时才浮现 -->
+                  <div class="message-actions" v-if="msg.role === 'user' && !editingMessageId">
+                    <button class="action-btn" @click="handleCopy(msg.content)" title="复制">
+                      <el-icon><CopyDocument /></el-icon>
+                    </button>
+                    <button class="action-btn" @click="handleEdit(msg)" title="编辑">
+                      <el-icon><Edit /></el-icon>
+                    </button>
+                    <button class="action-btn action-btn--retry" @click="handleRetry(msg)" title="重试">
+                      <el-icon><RefreshRight /></el-icon>
+                    </button>
                   </div>
-                  <template v-else>
-                    <!-- 语音消息：播报按钮 + 识别文本框 -->
-                    <div v-if="msg.source === 'voice'" class="voice-block">
-                      <div class="voice-block__header">
-                        <el-icon class="voice-block__icon"><Microphone /></el-icon>
-                        <span class="voice-block__label">语音消息</span>
-                      </div>
-                      <button
-                        class="voice-play-btn"
-                        :class="{ 'voice-play-btn--playing': speakingId === msg.id }"
-                        @click="handleTogglePlay(msg)"
-                        :title="speakingId === msg.id ? '停止播报' : '语音播报'"
-                      >
-                        <el-icon>
-                          <VideoPause v-if="speakingId === msg.id" />
-                          <VideoPlay v-else />
-                        </el-icon>
-                        <span>{{ speakingId === msg.id ? '停止播报' : '语音播报' }}</span>
-                      </button>
-                      <div class="voice-text-box" :title="msg.content">
-                        {{ msg.content || '(未识别到内容)' }}
+                  <div class="message-bubble" :class="`message-bubble--${msg.role}`">
+                    <div v-if="editingMessageId === msg.id" class="edit-wrapper">
+                      <el-input
+                        v-model="editingText"
+                        type="textarea"
+                        :rows="2"
+                        placeholder="修改内容"
+                        class="edit-input"
+                        @keydown.enter.exact.prevent="handleSaveEdit(msg.id)"
+                        @keydown.esc="handleCancelEdit"
+                      />
+                      <div class="edit-actions">
+                        <button class="edit-btn edit-btn--cancel" @click="handleCancelEdit">取消</button>
+                        <button class="edit-btn edit-btn--save" @click="handleSaveEdit(msg.id)">发送</button>
                       </div>
                     </div>
-                    <!--
-                      普通 assistant 消息：改用 StreamingBubble 聚合组件。
-                      把所有流式 / 折叠面板 / 操作栏都交给子组件处理,
-                      这里只负责传入数据 (msg + isStreaming + streamingReasoning)。
-                    -->
-                    <StreamingBubble
-                      v-else-if="msg.role === 'assistant'"
-                      :message="msg"
-                      :is-streaming="msg.id === chatStore.streamingMessageId"
-                      :streaming-reasoning="msg.id === chatStore.streamingMessageId ? streamingReasoningText : ''"
-                      class="message-streaming"
-                      @feedback="onAssistantFeedback"
-                    />
-                    <!-- 用户消息：直接展示 -->
-                    <div v-else class="message-content">
-                      <span v-if="msg.content">{{ msg.content }}</span>
-                    </div>
-                  </template>
+                    <template v-else>
+                      <!-- 语音消息：播报按钮 + 识别文本框 -->
+                      <div v-if="msg.source === 'voice'" class="voice-block">
+                        <div class="voice-block__header">
+                          <el-icon class="voice-block__icon"><Microphone /></el-icon>
+                          <span class="voice-block__label">语音消息</span>
+                        </div>
+                        <button
+                          class="voice-play-btn"
+                          :class="{ 'voice-play-btn--playing': speakingId === msg.id }"
+                          @click="handleTogglePlay(msg)"
+                          :title="speakingId === msg.id ? '停止播报' : '语音播报'"
+                        >
+                          <el-icon>
+                            <VideoPause v-if="speakingId === msg.id" />
+                            <VideoPlay v-else />
+                          </el-icon>
+                          <span>{{ speakingId === msg.id ? '停止播报' : '语音播报' }}</span>
+                        </button>
+                        <div class="voice-text-box" :title="msg.content">
+                          {{ msg.content || '(未识别到内容)' }}
+                        </div>
+                      </div>
+                      <!--
+                        普通 assistant 消息：改用 StreamingBubble 聚合组件。
+                        把所有流式 / 折叠面板 / 操作栏都交给子组件处理,
+                        这里只负责传入数据 (msg + isStreaming + streamingReasoning)。
+                      -->
+                      <StreamingBubble
+                        v-else-if="msg.role === 'assistant'"
+                        :message="msg"
+                        :is-streaming="msg.id === chatStore.streamingMessageId"
+                        :streaming-reasoning="msg.id === chatStore.streamingMessageId ? streamingReasoningText : ''"
+                        class="message-streaming"
+                        @feedback="onAssistantFeedback"
+                      />
+                      <!-- 用户消息：直接展示 -->
+                      <div v-else class="message-content">
+                        <span v-if="msg.content">{{ msg.content }}</span>
+                      </div>
+                    </template>
+                  </div>
                 </div>
                 <!--
                   时间戳:bubble 下方一行小字,智能格式
@@ -297,17 +311,6 @@
                   :class="`message-time--${msg.role}`"
                   :title="formatMessageTimeFull(msg.createdAt)"
                 >{{ formatMessageTime(msg.createdAt) }}</div>
-              </div>
-              <div class="message-actions" v-if="msg.role === 'user' && !editingMessageId">
-                <button class="action-btn" @click="handleCopy(msg.content)" title="复制">
-                  <el-icon><CopyDocument /></el-icon>
-                </button>
-                <button class="action-btn" @click="handleEdit(msg)" title="编辑">
-                  <el-icon><Edit /></el-icon>
-                </button>
-                <button class="action-btn action-btn--retry" @click="handleRetry(msg)" title="重试">
-                  <el-icon><RefreshRight /></el-icon>
-                </button>
               </div>
             </div>
           </div>
@@ -2509,37 +2512,57 @@ const placeholderHint = computed(() => {
   flex-shrink: 0;
 }
 
-/* 历史日历按钮(暗色辅助操作,左对齐 messages-toolbar 即可) */
+/*
+ * 历史日历按钮:胶囊玻璃质感 chip —— 顶部微高光 + 淡渐变底,图标用主题蓝点缀;
+ * hover 上浮 + 蓝色描边微光,展开弹窗时渐变为实心蓝(高亮当前态)。
+ * 与页面暗色底 + #165dff 主色、圆润控件风格保持一致。
+ */
 .history-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  height: 1.85rem;
-  padding: 0 0.85rem;
-  border-radius: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.78);
+  gap: 0.4rem;
+  height: clamp(1.9rem, 2.3vw, 2.15rem);
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 100%);
+  color: rgba(255, 255, 255, 0.85);
   font-size: 0.78rem;
   font-weight: 500;
+  letter-spacing: 0.02em;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
   flex-shrink: 0;
   white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 .history-btn .el-icon {
-  font-size: 0.92rem;
+  font-size: 0.95rem;
+  color: #8ab4ff;
+  transition: color 0.2s ease;
 }
 .history-btn:hover:not(.history-btn--active) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(91, 141, 239, 0.4);
+  border-color: rgba(91, 141, 239, 0.55);
+  background: linear-gradient(180deg, rgba(91, 141, 239, 0.26) 0%, rgba(91, 141, 239, 0.08) 100%);
   color: #fff;
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0.35rem 0.9rem rgba(22, 93, 255, 0.28);
+}
+.history-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+.history-btn:focus-visible {
+  outline: 2px solid rgba(122, 162, 255, 0.65);
+  outline-offset: 2px;
 }
 .history-btn--active {
-  background: rgba(22, 93, 255, 0.18);
-  border-color: rgba(22, 93, 255, 0.55);
+  border-color: rgba(122, 162, 255, 0.7);
+  background: linear-gradient(135deg, #165dff 0%, #5b8def 100%);
   color: #fff;
-  box-shadow: 0 0.2rem 0.55rem rgba(22, 93, 255, 0.18);
+  box-shadow: 0 0.3rem 0.9rem rgba(22, 93, 255, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.history-btn--active .el-icon {
+  color: #fff;
 }
 
 /* 历史日历弹窗 —— 沿用暗色主题,贴合 messages-toolbar 配色 */
@@ -2549,52 +2572,104 @@ const placeholderHint = computed(() => {
 /* popover 容器深色覆写(直接挂在 popper 上,需要 !important 压过 el 默认主题) */
 :global(.history-calendar-popover) {
   background: #2a2a2a !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.45) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 0.9rem !important;
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.5) !important;
   color: #fff;
+  padding: 0.75rem !important;
+}
+/* 箭头与面板同色同描边 —— 默认取 --el-bg-color-overlay(更黑),会和 #2a2a2a 面板撞出色差 */
+:global(.history-calendar-popover .el-popper__arrow::before) {
+  background: #2a2a2a !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 .history-calendar :deep(.el-calendar) {
-  --el-calendar-cell-width: 36px;
+  --el-calendar-cell-width: 40px;
   --el-calendar-header-padding: 0.3rem 0.4rem;
+  /* 网格线改暗:默认会落到 --el-border-color-lighter(#ebeef5 浅灰),在暗底上非常刺眼 */
+  --el-calendar-border: 1px solid rgba(255, 255, 255, 0.06);
+  /* 选中底色交给 .el-calendar-day 的圆角高亮:默认浅蓝 #ecf5ff 色块与白字冲突 */
+  --el-calendar-selected-bg-color: transparent;
+  /* 与 popover 面板同色,去掉「外框 #2a2a2a + 内层更黑」的双底色 */
+  background: transparent;
 }
 .history-calendar :deep(.el-calendar__header) {
-  color: rgba(255, 255, 255, 0.85);
-  padding: 0.25rem 0.4rem;
+  border-bottom: none;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.9);
+  padding: 0.3rem 0.3rem 0.6rem;
 }
 .history-calendar :deep(.el-calendar__title) {
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.92);
   font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* 「上月 / 今天 / 下月」:胶囊 chip,与历史按钮同一玻璃质感 */
+.history-calendar :deep(.el-calendar__button-group) {
+  display: flex;
 }
 .history-calendar :deep(.el-calendar__button-group .el-button) {
-  background: transparent;
-  color: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
   font-size: 0.72rem;
-  padding: 2px 8px;
+  height: 1.55rem;
+  padding: 0 0.6rem;
+  /* 拆开 el-button-group 的贴边拼接,改成独立胶囊 + 间距 */
+  margin: 0 0 0 0.4rem !important;
+  transition: all 0.2s;
 }
-.history-calendar :deep(.el-calendar__button-group .el-button.is-active),
+.history-calendar :deep(.el-calendar__button-group .el-button:first-child) {
+  margin-left: 0 !important;
+}
 .history-calendar :deep(.el-calendar__button-group .el-button:hover) {
+  background: rgba(91, 141, 239, 0.22);
+  border-color: rgba(91, 141, 239, 0.55);
   color: #fff;
-  background: rgba(22, 93, 255, 0.22);
-  border-color: rgba(22, 93, 255, 0.5);
 }
 .history-calendar :deep(.el-calendar__arrow-btn),
 .history-calendar :deep(.el-calendar__arrow-btn:hover) {
   color: rgba(255, 255, 255, 0.7);
 }
+.history-calendar :deep(.el-calendar__body) {
+  /* 默认 12px 20px 35px:底部 35px 是范围模式预留,单月模式白白留白 */
+  padding: 0.2rem 0.3rem 0.4rem;
+}
 .history-calendar :deep(.el-calendar-table) {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.72);
+}
+/* 星期表头:弱化,让日期成为视觉主体 */
+.history-calendar :deep(.el-calendar-table thead th) {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.3rem 0 0.35rem;
+}
+/* 非本月日期压暗(自定义 .history-calendar__day 覆盖了 el 的继承色,需要显式补) */
+.history-calendar :deep(.el-calendar-table td.prev) .history-calendar__day,
+.history-calendar :deep(.el-calendar-table td.next) .history-calendar__day {
+  color: rgba(255, 255, 255, 0.26);
 }
 .history-calendar :deep(.el-calendar-day) {
   padding: 0;
-  height: 36px;
+  height: 40px;
+  border-radius: 0.55rem;
+  transition: background-color 0.2s, box-shadow 0.2s;
 }
 .history-calendar :deep(.el-calendar-day:hover) {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.07);
 }
-.history-calendar :deep(.el-calendar-day.is-selected),
-.history-calendar :deep(.el-calendar-day.is-today) {
-  background: rgba(22, 93, 255, 0.18);
+/* 今日:蓝色描边环;选中:实心蓝渐变圆角高亮(与历史按钮展开态同色,选中规则在后优先) */
+.history-calendar :deep(.el-calendar-table td.is-today .el-calendar-day) {
+  box-shadow: inset 0 0 0 1px rgba(122, 162, 255, 0.65);
+}
+.history-calendar :deep(.el-calendar-table td.is-selected .el-calendar-day) {
+  background: linear-gradient(135deg, #165dff 0%, #5b8def 100%);
+  box-shadow: 0 0.15rem 0.5rem rgba(22, 93, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.history-calendar :deep(.el-calendar-table td.is-selected .history-calendar__day) {
   color: #fff;
 }
 .history-calendar__cell {
@@ -2626,26 +2701,6 @@ const placeholderHint = computed(() => {
   border-radius: 50%;
   background: #00b96b;
   box-shadow: 0 0 4px rgba(0, 185, 107, 0.55);
-}
-.history-calendar__dot--inline {
-  display: inline-block;
-  vertical-align: middle;
-  margin-right: 4px;
-}
-.history-calendar__legend,
-.history-calendar__hint {
-  margin-top: 0.5rem;
-  font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.5);
-  text-align: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-.history-calendar__hint {
-  margin-top: 0.25rem;
-  color: rgba(255, 255, 255, 0.4);
 }
 
 /* 滚动触顶哨兵 */
@@ -2832,6 +2887,25 @@ const placeholderHint = computed(() => {
   align-items: flex-end;
 }
 
+/*
+ * bubble-row:气泡所在的横排容器,承载「气泡 + 操作栏」的横向关系。
+ *  - assistant:display: contents —— 不生成盒子,气泡仍作为 col 的直接 flex 子项,
+ *    保持 width: 100% 的段落式换行行为不变(见 chat-bubble-width 回归测试)。
+ *  - user:     flex 行 —— 操作栏在 DOM 中先于气泡,渲染在气泡左侧、整组贴右;
+ *    修复此前操作栏被 bubble-col 的 flex:1 推到整行最左、与气泡隔一大片空白的问题。
+ */
+.message-bubble-row {
+  display: contents;
+}
+
+.message-bubble-row--user {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
 /* 消息时间戳:bubble 下方一行小字,默认低对比度避免抢戏,hover 行时略亮 */
 .message-time {
   margin-top: 0.28rem;
@@ -2848,10 +2922,11 @@ const placeholderHint = computed(() => {
   color: rgba(255, 255, 255, 0.55);
 }
 
+/* 用户消息操作栏:与气泡同处 message-bubble-row、底边对齐,不占独立行 */
 .message-actions {
   display: flex;
   gap: 0.25rem;
-  margin-top: 0.5rem;
+  flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.2s;
 }

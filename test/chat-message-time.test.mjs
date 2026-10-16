@@ -98,11 +98,12 @@ test('模板里每条消息都在 .message-bubble-col 里', () => {
 })
 
 test('模板里 .message-time 同时挂在 assistant 和 user 上', () => {
-  // 必须紧跟在 message-bubble 之后,在 message-bubble-col 内部
+  // 必须位于 message-bubble-col 内部:user 操作栏收进 message-bubble-row 后,
+  // 时间戳紧随 bubble-row 之后、col 收口之前。
   const colBlock = chatPageSrc.match(
-    /class="message-bubble-col"[\s\S]*?<\/div>\s*<div\s+class="message-actions"/,
+    /class="message-bubble-col"[\s\S]*?class="message-time"[\s\S]*?formatMessageTime\(msg\.createdAt\)/,
   )
-  assert.ok(colBlock, '应能找到 message-bubble-col → message-actions 这一段')
+  assert.ok(colBlock, '应能找到 message-bubble-col 内 message-time 的渲染区块')
   assert.ok(
     /class="message-time"/.test(colBlock[0]),
     '.message-bubble-col 内部必须有 .message-time 元素',
